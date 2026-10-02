@@ -121,6 +121,16 @@ async function main() {
     const studentSnapshot = await participants[0].update;
     assert.deepEqual(Object.keys(studentSnapshot).sort(), ['code', 'currentTopic', 'reexplain'].sort(), 'student updates should not expose teacher-only room data');
 
+    const singleVote = await emitAck(students[0], 'vote', { vote: 'lost' });
+    assert.equal(singleVote.ok, true, 'a single vote should be accepted');
+    await emitAck(teacher, 'next-topic', {});
+    const earlyReport = await emitAck(teacher, 'report-request', { code: roomCode, token });
+    assert.equal(earlyReport.ok, true, 'report should load with a small sample');
+    assert.equal(earlyReport.report.peak, null, 'a single vote must not be reported as a reliable peak');
+    const smallSample = earlyReport.report.history.find((sample) => sample.total === 1);
+    assert.ok(smallSample, 'report should include the recorded small sample');
+    assert.equal(smallSample.lostPct, null, 'small samples should be marked as insufficient');
+
     const choices = ['lost', 'ok', 'faster'];
     const expected = { lost: 0, ok: 0, faster: 0 };
     const votes = students.map(() => choices[crypto.randomInt(choices.length)]);

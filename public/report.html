@@ -78,8 +78,8 @@
         document.getElementById('studentCount').textContent = report.studentCount;
         document.getElementById('totalVotes').textContent = report.totalVotes;
         document.getElementById('participation').textContent = report.participation + '%';
-        document.getElementById('peakPct').textContent = report.peak?.pct + '%';
-        document.getElementById('peakTopic').textContent = report.peak?.topic || 'General';
+        document.getElementById('peakPct').textContent = report.peak ? report.peak.pct + '%' : '—';
+        document.getElementById('peakTopic').textContent = report.peak?.topic || 'Waiting for 3 votes';
         document.getElementById('answeredCount').textContent = report.answeredQsCount || 0;
 
         const unanswered = report.unansweredQuestions || [];
@@ -117,7 +117,10 @@
             topic.textContent = entry.topic || 'General';
             const detail = document.createElement('div');
             detail.className = 'small';
-            detail.textContent = new Date(entry.time).toLocaleTimeString() + ' · ' + entry.lostPct + '% lost';
+            const measurement = entry.lostPct === null
+              ? 'Not enough votes (' + entry.total + ')'
+              : entry.marker || entry.lostPct + '% lost';
+            detail.textContent = new Date(entry.time).toLocaleTimeString() + ' · ' + measurement;
             item.append(topic, detail);
             historyList.appendChild(item);
           });

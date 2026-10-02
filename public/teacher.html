@@ -63,7 +63,8 @@ Topic 3"></textarea>
             <span id="lostBar" class="lost" style="width:0%"></span>
           </div>
           <div class="small">Total votes: <span id="totalVotes">0</span></div>
-          <div class="small">Lost %: <span id="lostPct">0%</span></div>
+          <div class="small">Lost %: <span id="lostPct">Need 3 votes</span></div>
+          <div id="thresholdHint" class="small">A support prompt requires at least 3 responses.</div>
         </section>
       </div>
 
@@ -223,8 +224,12 @@ Topic 3"></textarea>
         document.getElementById('okCount').textContent = room.bars.ok;
         document.getElementById('fasterCount').textContent = room.bars.faster;
         document.getElementById('totalVotes').textContent = room.totalVotes;
-        document.getElementById('lostPct').textContent = room.lostPct + '%';
-        document.getElementById('lostBar').style.width = room.lostPct + '%';
+        const hasReliableSample = room.totalVotes >= 3;
+        document.getElementById('lostPct').textContent = hasReliableSample ? room.lostPct + '%' : 'Need 3 votes';
+        document.getElementById('thresholdHint').textContent = hasReliableSample
+          ? (room.thresholdReached ? 'Support prompt suggested: more than 30% feel lost.' : 'No support prompt threshold reached.')
+          : 'A support prompt requires at least 3 responses.';
+        document.getElementById('lostBar').style.width = hasReliableSample ? room.lostPct + '%' : '0%';
         renderQuestions(room.questions);
         renderEvents(room.events || []);
       }

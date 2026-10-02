@@ -169,7 +169,8 @@ function snapshotForTeacher(room) {
 
 function reportSnapshot(room) {
   const hist = room.history || [];
-  const peak = hist.reduce((p, h) => (h.lostPct > (p.lostPct || 0) ? h : p), { lostPct: 0 });
+  const eligibleSamples = hist.filter(h => h.total >= 3);
+  const peak = eligibleSamples.reduce((p, h) => (!p || h.lostPct > p.lostPct ? h : p), null);
   const answeredQs = room.questions.filter(q => q.answered && !q.hidden);
   const unansweredQs = room.questions.filter(q => !q.answered && !q.hidden);
   const voters = new Set(room.votes.keys());
@@ -179,11 +180,17 @@ function reportSnapshot(room) {
     studentCount: room.students.size,
     totalVotes: room.votes.size,
     participation,
-    peak: { pct: peak.lostPct, topic: peak.topic, time: peak.time },
+    peak: peak ? { pct: peak.lostPct, topic: peak.topic, time: peak.time } : null,
     events: room.events,
     answeredQsCount: answeredQs.length,
     unansweredQuestions: unansweredQs.map(q => ({ id: q.id, text: q.text, upvotes: q.upvotes.size })),
-    history: hist.map(h => ({ time: h.time, topic: h.topic, lostPct: h.lostPct, marker: h.marker }))
+    history: hist.map(h => ({
+      time: h.time,
+      topic: h.topic,
+      lostPct: h.marker || h.total >= 3 ? h.lostPct : null,
+      total: h.total,
+      marker: h.marker
+    }))
   };
 }
 
