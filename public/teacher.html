@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Teacher | Classroom Pulse</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/socket.io/socket.io.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Teacher Dashboard</h1>
+        <div class="toolbar">
+          <div class="badge connection-badge" id="connectionBadge">Connecting</div>
+          <button id="nextTopicBtn" class="primary" disabled>Next topic</button>
+          <button id="reexplainBtn" disabled>Start re-explain</button>
+          <a id="reportLink" class="btn" href="#">Open report</a>
+        </div>
+      </header>
+
+      <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="row">
+            <h2>Room</h2>
+            <span id="roomCodeBadge" class="badge">Room: —</span>
+          </div>
+          <div class="inline-actions" style="margin-top: -8px; margin-bottom: 14px;">
+            <button id="copyCodeBtn" type="button">Copy room code</button>
+            <button id="copyInviteBtn" type="button">Copy student link</button>
+          </div>
+          <div class="small">Students: <span id="studentCount">0</span></div>
+          <div class="small">Current topic: <span id="currentTopic">General</span></div>
+
+          <label>
+            Topics
+            <textarea id="topicsInput" rows="4" placeholder="General
+Topic 2
+Topic 3"></textarea>
+          </label>
+          <button id="setTopicsBtn" class="primary" disabled>Update topics</button>
+        </section>
+
+        <section class="card">
+          <h2>Live vote summary</h2>
+          <div class="bar-grid">
+            <div>
+              <div class="small">Lost</div>
+              <div id="lostCount">0</div>
+            </div>
+            <div>
+              <div class="small">OK</div>
+              <div id="okCount">0</div>
+            </div>
+            <div>
+              <div class="small">Faster</div>
+              <div id="fasterCount">0</div>
+            </div>
+          </div>
+          <div class="meter">
+            <span id="lostBar" class="lost" style="width:0%"></span>
+          </div>
+          <div class="small">Total votes: <span id="totalVotes">0</span></div>
+          <div class="small">Lost %: <span id="lostPct">0%</span></div>
+        </section>
+      </div>
+
+      <div class="grid" style="margin-top: 20px;">
+        <section class="card">
+          <h2>Questions</h2>
+          <ul id="questionsList" class="list"></ul>
+        </section>
+
+        <section class="card">
+          <h2>Events & history</h2>
+          <ul id="eventsList" class="list"></ul>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const roomCode = (params.get('room') || '').toUpperCase();
+      const token = new URLSearchParams(window.location.hash.slice(1)).get('token') || params.get('token') || '';
+      const socket = io();
+      const roomCodeBadge = document.getElementById('roomCodeBadge');
+      const studentCount = document.getElementById('studentCount');
+      const currentTopic = document.getElementById('currentTopic');
+      const topicsInput = document.getElementById('topicsInput');
+      const reportLink = document.getElementById('reportLink');
+      const statusBanner = document.getElementById('statusBanner');
+      const questionsList = document.getElementById('questionsList');
+      const eventsList = document.getElementById('eventsList');
+      const connectionBadge = document.getElementById('connectionBadge');
+      let joined = false;
+
+      function setTeacherControls(enabled) {
+        joined = enabled;
+        ['nextTopicBtn', 'reexplainBtn', 'setTopicsBtn', 'copyCodeBtn', 'copyInviteBtn'].forEach((id) => {
+          document.getElementById(id).disabled = !enabled;
+        });
+      }
+
+      function connectTeacher() {
+        connectionBadge.textContent = 'Authenticating';
+        socket.emit('teacher-join', { code: roomCode, token }, function (response) {
+          if (!response || !response.ok) {
+            setTeacherControls(false);
+            connectionBadge.textContent = 'Not connected';
+            connectionBadge.classList.add('disconnected');
+            connectionBadge.classList.remove('connected');
+            showStatus(response?.err || 'Could not join teacher room.', 'error');
+            return;
+          }
+          connectionBadge.textContent = 'Live';
+          connectionBadge.classList.add('connected');
+          connectionBadge.classList.remove('disconnected');
+          setTeacherControls(true);
+          reportLink.href = '/report.html?room=' + encodeURIComponent(roomCode) + '#token=' + encodeURIComponent(token);
+          renderRoom(response.room);
+        });
+      }
+
+      async function copyText(value, label) {
+        try {
+          await navigator.clipboard.writeText(value);
+          showStatus(label + ' copied to clipboard.', 'success');
+        } catch (error) {
+          showStatus('Clipboard access was blocked. Copy this: ' + value, 'error');
+        }
+      }
+
+      function showStatus(message, type = 'info') {
+        statusBanner.textContent = message;
+        statusBanner.classList.remove('hidden', 'error', 'success');
+        if (type === 'error') statusBanner.classList.add('error');
+        if (type === 'success') statusBanner.classList.add('success');
+      }
+
+      function renderQuestions(questions) {
+        questionsList.innerHTML = '';
+        if (!questions || !questions.length) {
+          const item = document.createElement('li');
+          item.textContent = 'No questions yet.';
+          questionsList.appendChild(item);
+          return;
+        }
+
+        questions.forEach((question) => {
+          const item = document.createElement('li');
+          const author = document.createElement('strong');
+          author.textContent = question.authorName || 'Student';
+          const text = document.createElement('div');
+          text.textContent = question.text;
+          const count = document.createElement('div');
+          count.className = 'small';
+          count.textContent = 'Upvotes: ' + question.upvotes;
+          item.append(author, text, count);
+          const actions = document.createElement('div');
+          actions.className = 'inline-actions';
+
+          const answeredBtn = document.createElement('button');
+          answeredBtn.textContent = question.answered ? 'Answered' : 'Mark answered';
+          answeredBtn.disabled = question.answered;
+          answeredBtn.addEventListener('click', function () {
+            socket.emit('moderate', { id: question.id, action: 'answered' }, function (response) {
+              if (!response || !response.ok) {
+                showStatus(response?.err || 'Moderation failed.', 'error');
+              }
+            });
+          });
+
+          const hideBtn = document.createElement('button');
+          hideBtn.textContent = question.hidden ? 'Hidden' : 'Hide';
+          hideBtn.disabled = question.hidden;
+          hideBtn.addEventListener('click', function () {
+            socket.emit('moderate', { id: question.id, action: 'hide' }, function (response) {
+              if (!response || !response.ok) {
+                showStatus(response?.err || 'Moderation failed.', 'error');
+              }
+            });
+          });
+
+          actions.appendChild(answeredBtn);
+          actions.appendChild(hideBtn);
+          item.appendChild(actions);
+          questionsList.appendChild(item);
+        });
+      }
+
+      function renderEvents(events) {
+        eventsList.innerHTML = '';
+        if (!events || !events.length) {
+          const item = document.createElement('li');
+          item.textContent = 'No events yet.';
+          eventsList.appendChild(item);
+          return;
+        }
+
+        events.slice().reverse().forEach((event) => {
+          const item = document.createElement('li');
+          const type = document.createElement('strong');
+          type.textContent = event.type;
+          const topic = document.createElement('div');
+          topic.className = 'small';
+          topic.textContent = event.topic || 'General';
+          const detail = document.createElement('div');
+          detail.textContent = (event.lostPct ?? '') + (event.verdict ? ' · ' + event.verdict : '');
+          item.append(type, topic, detail);
+          eventsList.appendChild(item);
+        });
+      }
+
+      function renderRoom(room) {
+        if (!room) return;
+        roomCodeBadge.textContent = 'Room: ' + room.code;
+        studentCount.textContent = room.studentCount;
+        currentTopic.textContent = room.currentTopic || 'General';
+        if (document.activeElement !== topicsInput) topicsInput.value = (room.topics || ['General']).join('\n');
+        document.getElementById('lostCount').textContent = room.bars.lost;
+        document.getElementById('okCount').textContent = room.bars.ok;
+        document.getElementById('fasterCount').textContent = room.bars.faster;
+        document.getElementById('totalVotes').textContent = room.totalVotes;
+        document.getElementById('lostPct').textContent = room.lostPct + '%';
+        document.getElementById('lostBar').style.width = room.lostPct + '%';
+        renderQuestions(room.questions);
+        renderEvents(room.events || []);
+      }
+
+      socket.on('connect', function () {
+        connectionBadge.textContent = 'Connected';
+        connectionBadge.classList.remove('disconnected');
+        connectionBadge.classList.add('connected');
+        connectTeacher();
+      });
+      socket.on('disconnect', function () {
+        connectionBadge.textContent = 'Reconnecting';
+        connectionBadge.classList.add('disconnected');
+        connectionBadge.classList.remove('connected');
+        setTeacherControls(false);
+        showStatus('Connection lost. Reconnecting automatically…', 'error');
+      });
+      socket.on('connect_error', function () {
+        connectionBadge.textContent = 'Connection issue';
+        connectionBadge.classList.add('disconnected');
+        connectionBadge.classList.remove('connected');
+        setTeacherControls(false);
+      });
+
+      document.getElementById('copyCodeBtn').addEventListener('click', function () {
+        copyText(roomCode, 'Room code');
+      });
+      document.getElementById('copyInviteBtn').addEventListener('click', function () {
+        copyText(new URL('/student.html?room=' + encodeURIComponent(roomCode), window.location.origin).href, 'Student link');
+      });
+
+      document.getElementById('setTopicsBtn').addEventListener('click', function () {
+        const topics = topicsInput.value.split(/\n|,/).map((t) => t.trim()).filter(Boolean);
+        socket.emit('set-topics', { topics }, function (response) {
+          if (!response || !response.ok) {
+            showStatus(response?.err || 'Topics not updated.', 'error');
+            return;
+          }
+          showStatus('Topics updated.', 'success');
+        });
+      });
+
+      document.getElementById('nextTopicBtn').addEventListener('click', function () {
+        socket.emit('next-topic', {}, function (response) {
+          if (!response || !response.ok) {
+            showStatus(response?.err || 'Could not advance topic.', 'error');
+            return;
+          }
+          showStatus('Moved to ' + response.topic + '.', 'success');
+        });
+      });
+
+      document.getElementById('reexplainBtn').addEventListener('click', function () {
+        socket.emit('reexplain-start', {}, function (response) {
+          if (!response || !response.ok) {
+            showStatus(response?.err || 'Re-explain could not start.', 'error');
+            return;
+          }
+          showStatus('Re-explain started. Baseline: ' + response.before + '% lost.', 'success');
+        });
+      });
+
+      socket.on('room-update', function (room) {
+        renderRoom(room);
+      });
+    </script>
+  </body>
+</html>

@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Report | Classroom Pulse</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/socket.io/socket.io.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Room Report</h1>
+        <div class="toolbar">
+          <span id="roomBadge" class="badge">Room: —</span>
+          <button id="downloadReportBtn" type="button" disabled>Download CSV</button>
+          <button id="printReportBtn" type="button" disabled>Print report</button>
+        </div>
+      </header>
+
+      <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
+
+      <div class="grid">
+        <section class="card">
+          <h3>Participation</h3>
+          <div class="small">Students: <span id="studentCount">0</span></div>
+          <div class="small">Votes: <span id="totalVotes">0</span></div>
+          <div class="small">Participation: <span id="participation">0%</span></div>
+        </section>
+
+        <section class="card">
+          <h3>Peak lost percentage</h3>
+          <div id="peakPct">0%</div>
+          <div class="small" id="peakTopic">General</div>
+        </section>
+
+        <section class="card">
+          <h3>Question summary</h3>
+          <div class="small">Answered: <span id="answeredCount">0</span></div>
+          <div class="small">Unanswered: <span id="unansweredCount">0</span></div>
+        </section>
+      </div>
+
+      <div class="grid" style="margin-top: 20px;">
+        <section class="card">
+          <h2>Unanswered questions</h2>
+          <ul id="unansweredList" class="list"></ul>
+        </section>
+
+        <section class="card">
+          <h2>History</h2>
+          <ul id="historyList" class="list"></ul>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const roomCode = (params.get('room') || '').toUpperCase();
+      const token = new URLSearchParams(window.location.hash.slice(1)).get('token') || params.get('token') || '';
+      const socket = io();
+      let loadedReport = null;
+
+      function showStatus(message, type = 'info') {
+        const banner = document.getElementById('statusBanner');
+        banner.textContent = message;
+        banner.classList.remove('hidden', 'error', 'success');
+        if (type === 'error') banner.classList.add('error');
+        if (type === 'success') banner.classList.add('success');
+      }
+
+      function renderReport(report) {
+        if (!report) return;
+        loadedReport = report;
+        document.getElementById('downloadReportBtn').disabled = false;
+        document.getElementById('printReportBtn').disabled = false;
+        document.getElementById('roomBadge').textContent = 'Room: ' + report.code;
+        document.getElementById('studentCount').textContent = report.studentCount;
+        document.getElementById('totalVotes').textContent = report.totalVotes;
+        document.getElementById('participation').textContent = report.participation + '%';
+        document.getElementById('peakPct').textContent = report.peak?.pct + '%';
+        document.getElementById('peakTopic').textContent = report.peak?.topic || 'General';
+        document.getElementById('answeredCount').textContent = report.answeredQsCount || 0;
+
+        const unanswered = report.unansweredQuestions || [];
+        document.getElementById('unansweredCount').textContent = unanswered.length;
+        const unansweredList = document.getElementById('unansweredList');
+        unansweredList.innerHTML = '';
+        if (!unanswered.length) {
+          const item = document.createElement('li');
+          item.textContent = 'No unanswered questions.';
+          unansweredList.appendChild(item);
+        } else {
+          unanswered.forEach((question) => {
+            const item = document.createElement('li');
+            const text = document.createElement('strong');
+            text.textContent = question.text;
+            const count = document.createElement('div');
+            count.className = 'small';
+            count.textContent = 'Upvotes: ' + question.upvotes;
+            item.append(text, count);
+            unansweredList.appendChild(item);
+          });
+        }
+
+        const historyList = document.getElementById('historyList');
+        historyList.innerHTML = '';
+        const history = report.history || [];
+        if (!history.length) {
+          const item = document.createElement('li');
+          item.textContent = 'No history recorded.';
+          historyList.appendChild(item);
+        } else {
+          history.forEach((entry) => {
+            const item = document.createElement('li');
+            const topic = document.createElement('strong');
+            topic.textContent = entry.topic || 'General';
+            const detail = document.createElement('div');
+            detail.className = 'small';
+            detail.textContent = new Date(entry.time).toLocaleTimeString() + ' · ' + entry.lostPct + '% lost';
+            item.append(topic, detail);
+            historyList.appendChild(item);
+          });
+        }
+      }
+
+      function csvCell(value) {
+        let text = String(value ?? '');
+        if (/^[=+\-@]/.test(text)) text = "'" + text;
+        return '"' + text.replace(/"/g, '""') + '"';
+      }
+
+      document.getElementById('downloadReportBtn').addEventListener('click', function () {
+        if (!loadedReport) return;
+        const rows = [
+          ['Section', 'Topic', 'Time', 'Lost percent', 'Question', 'Upvotes'],
+          ...loadedReport.history.map((entry) => ['History', entry.topic, new Date(entry.time).toISOString(), entry.lostPct, '', '']),
+          ...loadedReport.unansweredQuestions.map((question) => ['Unanswered question', '', '', '', question.text, question.upvotes])
+        ];
+        const csv = rows.map((row) => row.map(csvCell).join(',')).join('\r\n');
+        const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = 'classroom-pulse-' + loadedReport.code + '.csv';
+        link.click();
+        URL.revokeObjectURL(url);
+      });
+      document.getElementById('printReportBtn').addEventListener('click', function () {
+        window.print();
+      });
+
+      socket.emit('report-request', { code: roomCode, token }, function (response) {
+        if (!response || !response.ok) {
+          showStatus(response?.err || 'Could not load report.', 'error');
+          return;
+        }
+        renderReport(response.report);
+      });
+    </script>
+  </body>
+</html>

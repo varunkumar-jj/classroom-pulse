@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Classroom Pulse</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container narrow">
+      <div class="hero">
+        <div class="brand"><span class="brand-mark">✳</span><span>Classroom Pulse</span></div>
+        <p class="eyebrow" style="margin-top: 34px;">Make every lesson responsive</p>
+        <h1>See the room.<br /><span>Teach the moment.</span></h1>
+        <p class="hero-copy">Quick check-ins help teachers spot confusion, make space for questions, and keep every student in sync.</p>
+      </div>
+
+      <div class="grid">
+        <section class="card join-card">
+          <div class="row">
+            <div>
+              <p class="eyebrow">Student access</p>
+              <h2>Join your class</h2>
+            </div>
+            <span class="badge connection-badge" id="connectionBadge">Connecting</span>
+          </div>
+          <p class="small">Enter the four-character room code shared by your teacher.</p>
+          <form id="studentForm">
+          <label>
+            Room code
+            <input id="roomCode" maxlength="4" minlength="4" pattern="[A-HJ-NP-Z2-9]{4}" autocomplete="off" autocapitalize="characters" placeholder="e.g. K7MP" aria-describedby="roomHint" required />
+          </label>
+            <div id="roomHint" class="form-hint"><span>Letters and numbers, case-insensitive</span><span id="roomLength">0 / 4</span></div>
+            <button id="joinButton" type="submit" class="primary" style="width: 100%; margin-top: 16px;">Join classroom <span aria-hidden="true">→</span></button>
+          </form>
+          <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite" style="margin-top: 18px;"></div>
+        </section>
+
+        <section class="card">
+          <p class="eyebrow">For educators</p>
+          <h2>Start a live room</h2>
+          <p class="small">Create a room, share its code, and see check-ins and questions update as they come in.</p>
+          <a class="btn" href="/create">Create teacher room <span aria-hidden="true">↗</span></a>
+          <div style="height: 1px; background: var(--border); margin: 22px 0;"></div>
+          <p class="small">No account needed for a local classroom session. Keep your teacher link private.</p>
+        </section>
+      </div>
+    </main>
+
+    <script>
+      const roomInput = document.getElementById('roomCode');
+      const joinButton = document.getElementById('joinButton');
+      const statusBanner = document.getElementById('statusBanner');
+      const connectionBadge = document.getElementById('connectionBadge');
+
+      roomInput.addEventListener('input', function () {
+        const start = this.selectionStart;
+        const value = this.value.toUpperCase().replace(/[^A-HJ-NP-Z2-9]/g, '').slice(0, 4);
+        this.value = value;
+        document.getElementById('roomLength').textContent = value.length + ' / 4';
+        if (start !== null) this.setSelectionRange(Math.min(start, value.length), Math.min(start, value.length));
+      });
+
+      fetch('/healthz').then(function (response) {
+        if (!response.ok) throw new Error('Service unavailable');
+        connectionBadge.textContent = 'Service online';
+        connectionBadge.classList.add('connected');
+      }).catch(function () {
+        connectionBadge.textContent = 'Service unavailable';
+        connectionBadge.classList.add('disconnected');
+      });
+
+      document.getElementById('studentForm').addEventListener('submit', function (event) {
+        event.preventDefault();
+        const code = roomInput.value.trim().toUpperCase();
+        if (code.length !== 4) {
+          statusBanner.textContent = 'Enter the full 4-character room code.';
+          statusBanner.className = 'status-banner error';
+          return;
+        }
+        joinButton.classList.add('loading');
+        joinButton.disabled = true;
+        window.location.href = '/student.html?room=' + encodeURIComponent(code);
+      });
+    </script>
+  </body>
+</html>

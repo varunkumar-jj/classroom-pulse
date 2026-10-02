@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Student | Classroom Pulse</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <script src="/socket.io/socket.io.js"></script>
+  </head>
+  <body>
+    <div class="container">
+      <header>
+        <h1>Student View</h1>
+        <div class="toolbar">
+          <div class="badge connection-badge" id="connectionBadge">Connecting</div>
+          <div class="badge" id="roomBadge">Room: —</div>
+        </div>
+      </header>
+
+      <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="row">
+            <h2>Current topic</h2>
+            <span class="badge" id="currentTopic">General</span>
+          </div>
+          <form id="joinForm">
+            <label>
+              Name
+              <input id="studentName" maxlength="30" placeholder="Your name" />
+            </label>
+            <label>
+              Room code
+              <input id="roomInput" maxlength="10" placeholder="ABCD" required />
+            </label>
+            <button type="submit" class="primary">Join room</button>
+          </form>
+
+          <div id="votePanel" class="hidden" style="margin-top: 20px;">
+            <h3>How are you feeling?</h3>
+            <div class="vote-grid">
+              <button class="vote-btn" data-vote="lost">Lost</button>
+              <button class="vote-btn" data-vote="ok">OK</button>
+              <button class="vote-btn" data-vote="faster">Faster</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="card">
+          <h2>Ask a question</h2>
+          <form id="questionForm">
+            <textarea id="questionInput" maxlength="140" rows="4" placeholder="Type your question..." aria-describedby="questionCount"></textarea>
+            <div class="form-hint"><span>Keep it short and clear</span><span id="questionCount">0 / 140</span></div>
+            <div class="inline-actions" style="margin-top: 10px;">
+              <button type="submit" class="primary">Send</button>
+            </div>
+          </form>
+          <div id="reexplainPanel" class="hidden" style="margin-top: 18px;">
+            <h3>Re-explain check-in</h3>
+            <div class="inline-actions">
+              <button class="reexplain-btn success" data-answer="got_it">Got it</button>
+              <button class="reexplain-btn danger" data-answer="still_lost">Still lost</button>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <section class="card" style="margin-top: 20px;">
+        <h2>Questions</h2>
+        <ul id="questionList" class="list"></ul>
+      </section>
+    </div>
+
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const roomCode = (params.get('room') || '').toUpperCase();
+      const roomInput = document.getElementById('roomInput');
+      const roomBadge = document.getElementById('roomBadge');
+      const currentTopic = document.getElementById('currentTopic');
+      const joinForm = document.getElementById('joinForm');
+      const questionForm = document.getElementById('questionForm');
+      const questionInput = document.getElementById('questionInput');
+      const votePanel = document.getElementById('votePanel');
+      const questionList = document.getElementById('questionList');
+      const reexplainPanel = document.getElementById('reexplainPanel');
+      const statusBanner = document.getElementById('statusBanner');
+      const connectionBadge = document.getElementById('connectionBadge');
+      const questionCount = document.getElementById('questionCount');
+      const socket = io();
+      let studentId = localStorage.getItem('classroom-pulse-student-id') || '';
+      let joined = false;
+      let reexplainActive = false;
+      let reexplainAnswered = false;
+
+      if (roomCode) roomInput.value = roomCode;
+
+      function showStatus(message, type = 'info') {
+        statusBanner.textContent = message;
+        statusBanner.classList.remove('hidden', 'error', 'success');
+        if (type === 'error') statusBanner.classList.add('error');
+        if (type === 'success') statusBanner.classList.add('success');
+      }
+
+      function syncControls() {
+        const online = socket.connected;
+        document.querySelectorAll('.vote-btn, .reexplain-btn').forEach((button) => {
+          button.disabled = !joined || !online || (button.classList.contains('reexplain-btn') && reexplainAnswered);
+        });
+        questionForm.querySelector('button[type="submit"]').disabled = !joined || !online;
+        questionInput.disabled = !joined || !online;
+      }
+
+      function joinRoom(isReconnect = false) {
+        const code = (roomInput.value || '').trim().toUpperCase();
+        const name = (document.getElementById('studentName').value || '').trim();
+        if (!code) {
+          showStatus('Choose a room code first.', 'error');
+          return;
+        }
+
+        socket.emit('student-join', { code, name, id: studentId }, function (response) {
+          if (!response || !response.ok) {
+            showStatus(response?.err || 'Unable to join this room.', 'error');
+            return;
+          }
+          joined = true;
+          studentId = response.id;
+          localStorage.setItem('classroom-pulse-student-id', studentId);
+          roomBadge.textContent = 'Room: ' + code;
+          if (!isReconnect) showStatus('You joined room ' + code + '.', 'success');
+          votePanel.classList.remove('hidden');
+          syncControls();
+        });
+      }
+
+      joinForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        joinRoom();
+      });
+
+      document.querySelectorAll('.vote-btn').forEach((button) => {
+        button.addEventListener('click', function () {
+          if (!joined) return;
+          const vote = this.dataset.vote;
+          socket.emit('vote', { vote }, function (response) {
+            if (!response || !response.ok) {
+              showStatus(response?.err || 'Vote failed.', 'error');
+              return;
+            }
+            document.querySelectorAll('.vote-btn').forEach((item) => item.classList.toggle('selected', item.dataset.vote === vote));
+            showStatus('Vote saved.', 'success');
+          });
+        });
+      });
+
+      questionForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (!joined) {
+          showStatus('Join the room before asking a question.', 'error');
+          return;
+        }
+        const text = questionInput.value.trim();
+        if (!text) return;
+        socket.emit('question', { text }, function (response) {
+          if (!response || !response.ok) {
+            showStatus(response?.err || 'Question not sent.', 'error');
+            return;
+          }
+          questionInput.value = '';
+          showStatus('Question posted.', 'success');
+        });
+        questionInput.addEventListener('input', function () {
+          questionCount.textContent = this.value.length + ' / 140';
+        });
+      });
+
+      document.querySelectorAll('.reexplain-btn').forEach((button) => {
+        button.addEventListener('click', function () {
+          socket.emit('reexplain-answer', { answer: this.dataset.answer }, function (response) {
+            if (!response || !response.ok) {
+              showStatus(response?.err || 'Could not submit response.', 'error');
+              return;
+            }
+            reexplainPanel.classList.add('hidden');
+            reexplainAnswered = true;
+            showStatus('Response recorded.', 'success');
+          });
+        });
+      });
+
+      socket.on('your-vote', function (vote) {
+        document.querySelectorAll('.vote-btn').forEach((item) => item.classList.toggle('selected', item.dataset.vote === vote));
+      });
+
+      socket.on('room-update', function (room) {
+        if (!room) return;
+        currentTopic.textContent = room.currentTopic || 'General';
+        const active = Boolean(room.reexplain);
+        if (active && !reexplainActive) reexplainAnswered = false;
+        reexplainActive = active;
+        if (active && !reexplainAnswered) {
+          reexplainPanel.classList.remove('hidden');
+        } else {
+          reexplainPanel.classList.add('hidden');
+        }
+      });
+
+      socket.on('connect', function () {
+        connectionBadge.textContent = 'Connected';
+        connectionBadge.classList.add('connected');
+        connectionBadge.classList.remove('disconnected');
+        if (joined) joinRoom(true);
+        syncControls();
+      });
+      socket.on('disconnect', function () {
+        connectionBadge.textContent = 'Reconnecting';
+        connectionBadge.classList.add('disconnected');
+        connectionBadge.classList.remove('connected');
+        showStatus('Connection lost. Reconnecting automatically…', 'error');
+        syncControls();
+      });
+      socket.on('connect_error', function () {
+        connectionBadge.textContent = 'Connection issue';
+        connectionBadge.classList.add('disconnected');
+        connectionBadge.classList.remove('connected');
+        syncControls();
+      });
+      setInterval(function () {
+        if (joined) socket.emit('ping');
+      }, 60 * 1000);
+
+      socket.on('student-questions', function (questions) {
+        questionList.innerHTML = '';
+        if (!questions || !questions.length) {
+          const item = document.createElement('li');
+          item.textContent = 'No questions yet.';
+          questionList.appendChild(item);
+          return;
+        }
+
+        questions.forEach((question) => {
+          const li = document.createElement('li');
+          const text = document.createElement('strong');
+          text.textContent = question.text;
+          const count = document.createElement('div');
+          count.className = 'small';
+          count.textContent = 'Upvotes: ' + question.upvotes;
+          li.append(text, count);
+          const button = document.createElement('button');
+          button.textContent = 'Upvote';
+          button.className = 'primary';
+          button.addEventListener('click', function () {
+            socket.emit('upvote', { id: question.id }, function (response) {
+              if (!response || !response.ok) {
+                showStatus(response?.err || 'Could not upvote.', 'error');
+                return;
+              }
+            });
+          });
+          li.appendChild(button);
+          questionList.appendChild(li);
+        });
+      });
+
+      if (roomCode) {
+        roomInput.value = roomCode;
+        joinRoom();
+      }
+      syncControls();
+    </script>
+  </body>
+</html>
