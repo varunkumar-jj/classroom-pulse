@@ -79,18 +79,30 @@ function addEvent(room, event) {
 function recordSample(room) {
   const bars = voteBars(room);
   const totalVotes = room.votes.size;
-  const lostPct = totalVotes ? Math.round((bars.lost / totalVotes) * 100) : 0;
+  if (!totalVotes) return;
+
+  const lostPct = Math.round((bars.lost / totalVotes) * 100);
+  const previous = [...room.history].reverse().find(h => !h.marker);
+  const unchanged = previous
+    && previous.topic === room.currentTopic
+    && previous.total === totalVotes
+    && previous.counts.lost === bars.lost
+    && previous.counts.ok === bars.ok
+    && previous.counts.faster === bars.faster;
+  if (unchanged) return;
+
   room.history.push({ time: now(), topic: room.currentTopic, counts: bars, total: totalVotes, lostPct });
   if (room.history.length > MAX_HISTORY_PER_ROOM) room.history.shift();
 
-  if (totalVotes >= 3 && lostPct > 30) {
-    const prev = room.history[room.history.length - 2];
-    if (!prev || prev.lostPct <= 30) {
+  const previousReachedThreshold = previous
+    && previous.topic === room.currentTopic
+    && previous.total >= 3
+    && previous.lostPct > 30;
+  if (totalVotes >= 3 && lostPct > 30 && !previousReachedThreshold) {
       addEvent(room, { type: 'spike', time: now(), topic: room.currentTopic, lostPct, before: lostPct });
       if (!room.reexplain) {
         room.reexplain = { before: lostPct, startedAt: now(), deadline: now() + REEVAL_WINDOW_MS, answers: new Map() };
       }
-    }
   }
 }
 

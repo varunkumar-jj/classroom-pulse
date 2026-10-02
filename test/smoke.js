@@ -130,6 +130,14 @@ async function main() {
     const smallSample = earlyReport.report.history.find((sample) => sample.total === 1);
     assert.ok(smallSample, 'report should include the recorded small sample');
     assert.equal(smallSample.lostPct, null, 'small samples should be marked as insufficient');
+    assert.ok(earlyReport.report.history.every((sample) => sample.marker || sample.total > 0), 'empty polling intervals should not pollute report history');
+
+    await Promise.all(students.slice(1, 3).map((student) => emitAck(student, 'vote', { vote: 'lost' })));
+    const thresholdUpdate = waitForRoomUpdate(teacher, (snapshot) => Boolean(snapshot.reexplain));
+    await emitAck(teacher, 'next-topic', {});
+    const triggered = await thresholdUpdate;
+    assert.equal(triggered.totalVotes, 3, 'confusion threshold should only be considered with three votes');
+    assert.ok(triggered.reexplain, 'reaching the threshold at three confused votes should start a re-explain prompt');
 
     const choices = ['lost', 'ok', 'faster'];
     const expected = { lost: 0, ok: 0, faster: 0 };

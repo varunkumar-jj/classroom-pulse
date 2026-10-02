@@ -21,6 +21,9 @@ npm run test:smoke
 The test starts an isolated server on an available local port, simulates a
 teacher and 50 randomly voting student clients, and checks the room, vote,
 question, topic, moderation, check-in, report, and health-check flows.
+It also checks that one-vote samples are not presented as reliable confusion
+peaks and that the automatic re-explain prompt triggers at the three-vote
+threshold.
 
 ## Deploy the Node app
 
