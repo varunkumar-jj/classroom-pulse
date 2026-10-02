@@ -42,9 +42,12 @@ The included `render.yaml` configures the current app as a Render Web Service.
    deployment's `/healthz` endpoint returns `{"status":"ok"}`, then open its
    HTTPS URL and test creating a room and joining as a student.
 4. Keep one instance for this in-memory version. Choose an always-on service
-   plan for a classroom session; free plans may sleep or restart. The host's
-   health check and restart policy can recover a failed process, but cannot
-   prevent every outage.
+   plan for a classroom session. The included Blueprint uses Render's free
+   plan so the public pilot can start without intentionally selecting a paid
+   instance; Render free services may sleep after inactivity or restart, and
+   active in-memory rooms are lost on restart. The host's health check and
+   restart policy can recover a failed process, but cannot prevent every
+   outage.
 
 ## Optional Cloudflare domain
 

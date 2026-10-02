@@ -2,6 +2,7 @@ services:
   - type: web
     name: classroom-pulse
     runtime: node
+    plan: free
     buildCommand: npm ci --omit=dev
     startCommand: npm start
     healthCheckPath: /healthz

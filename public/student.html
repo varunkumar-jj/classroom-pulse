@@ -138,6 +138,9 @@
         event.preventDefault();
         joinRoom();
       });
+      questionInput.addEventListener('input', function () {
+        questionCount.textContent = this.value.length + ' / 140';
+      });
 
       document.querySelectorAll('.vote-btn').forEach((button) => {
         button.addEventListener('click', function () {
@@ -168,10 +171,8 @@
             return;
           }
           questionInput.value = '';
+          questionCount.textContent = '0 / 140';
           showStatus('Question posted.', 'success');
-        });
-        questionInput.addEventListener('input', function () {
-          questionCount.textContent = this.value.length + ' / 140';
         });
       });
 
