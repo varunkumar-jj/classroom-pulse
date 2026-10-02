@@ -25,6 +25,14 @@ It also checks that one-vote samples are not presented as reliable confusion
 peaks and that the automatic re-explain prompt triggers at the three-vote
 threshold.
 
+## Share a classroom
+
+Anyone can open the public app URL. A teacher creates a room and shares the
+student link or four-character room code; students join from their own phones
+or computers. Votes and questions appear on the teacher dashboard over
+Socket.IO in real time. The teacher dashboard URL contains a private token:
+share the student link, not the teacher link.
+
 ## Deploy the Node app
 
 The existing app needs a Node host that supports long-lived Socket.IO
