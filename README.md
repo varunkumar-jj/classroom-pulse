@@ -23,7 +23,8 @@ teacher and 50 randomly voting student clients, and checks the room, vote,
 question, topic, moderation, check-in, report, and health-check flows.
 It also checks that one-vote samples are not presented as reliable confusion
 peaks and that the automatic re-explain prompt triggers at the three-vote
-threshold.
+threshold. AI generation and grading use a local mock OpenAI-compatible
+endpoint in the test, so the test does not spend API credits.
 
 ## Share a classroom
 
@@ -63,6 +64,35 @@ are held in the same in-memory room as the class,
 so a server restart or room expiry requires enabling alerts again. Notification
 and vibration behavior depends on browser and device settings; on iOS, web push
 requires adding the site to the Home Screen.
+
+## AI quizzes and video rooms
+
+The teacher AI Quiz tab accepts PDF, Word, Markdown, and text lesson material.
+It generates a validated mix of multiple-choice, true/false, and rubric-based
+short-answer questions. Teachers can choose question count, difficulty, and
+types, then review reference answers and rubrics before launching. Objective
+questions are scored locally; short answers are graded by the configured
+OpenAI model and students receive a score with feedback. Treat AI grades as
+assistance: review results before using them for formal assessment.
+
+Configure `OPENAI_API_KEY` on the server. `OPENAI_MODEL` defaults to
+`gpt-4o-mini`; set it to another model that supports structured JSON output if
+needed. The key stays on the server and must never be put in browser code.
+
+Class video uses LiveKit Cloud's SFU instead of a peer-to-peer mesh, so each
+client publishes to the media server rather than uploading media separately to
+every participant. Create a LiveKit project and configure `LIVEKIT_URL`,
+`LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET` on the server. The API secret is
+used only to issue short-lived, room-scoped participant tokens and is never
+sent to browsers. Without all three values, the video room reports that
+service configuration is unavailable. Teachers join with camera and microphone
+enabled by default; students join muted with cameras off and can opt in.
+Camera, microphone, and screen sharing require a secure HTTPS context and user
+permission.
+
+For a Render Blueprint, set the OpenAI and LiveKit values when prompted or add
+them under the service's **Environment** settings, then redeploy. Keep the
+OpenAI key and LiveKit API secret private; do not commit them.
 
 ## Deploy the Node app
 

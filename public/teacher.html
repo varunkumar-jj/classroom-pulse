@@ -35,6 +35,7 @@
             <span class="brand-mark" style="font-size:14px;">📹</span>
             <h2>Video Room — <span id="videoRoomCode">—</span></h2>
             <span id="videoPeerCount" class="badge">1 participant</span>
+            <span id="videoConnectionStatus" class="badge">Connecting</span>
           </div>
           <button id="leaveVideoBtn" class="ctrl-btn end">📵 <span>Leave</span></button>
         </div>
@@ -126,7 +127,7 @@
               <span class="ai-icon">🤖</span>
               <div>
                 <h2 style="margin:0;font-size:1.15rem;">AI Quiz Generator</h2>
-                <p class="small" style="margin:2px 0 0;">Upload class material → GPT-4o generates MCQs</p>
+                <p class="small" style="margin:2px 0 0;">Upload class material → build a source-grounded, mixed-format quiz</p>
               </div>
             </div>
 
@@ -143,6 +144,22 @@
               <label for="quizCount">Number of questions</label>
               <input type="number" id="quizCount" min="1" max="20" value="5" />
             </div>
+            <label>
+              Difficulty
+              <select id="quizDifficulty">
+                <option value="mixed">Balanced mix</option>
+                <option value="easy">Easy</option>
+                <option value="medium">Medium</option>
+                <option value="hard">Hard</option>
+              </select>
+            </label>
+            <fieldset class="quiz-type-options">
+              <legend>Question types</legend>
+              <label><input type="checkbox" name="quizType" value="mcq" checked /> Multiple choice</label>
+              <label><input type="checkbox" name="quizType" value="true_false" checked /> True / false</label>
+              <label><input type="checkbox" name="quizType" value="short_answer" checked /> Short answer (AI graded)</label>
+            </fieldset>
+            <p class="small">Short answers are graded by AI using the generated rubric. Review the preview before launching.</p>
 
             <button id="generateQuizBtn" class="primary" style="width:100%;margin-top:14px;" disabled>
               ✨ Generate Quiz
@@ -542,7 +559,7 @@
 
       function setSelectedFile(file) {
         selectedFile = file;
-        generateQuizBtn.disabled = false;
+        generateQuizBtn.disabled = !joined || quizActive;
         const wrapper = document.getElementById('fileChipWrapper');
         wrapper.innerHTML = '';
         wrapper.classList.remove('hidden');
@@ -560,31 +577,35 @@
 
       generateQuizBtn.addEventListener('click', async function () {
         if (!selectedFile || !joined) return;
+        if (quizActive) { showStatus('End the active quiz before replacing it.', 'error'); return; }
         const count = parseInt(document.getElementById('quizCount').value) || 5;
+        const types = [...document.querySelectorAll('input[name="quizType"]:checked')].map((input) => input.value);
+        if (!types.length) { showStatus('Select at least one question type.', 'error'); return; }
+        if (types.length > count) { showStatus('Question count must be at least the number of selected question types.', 'error'); return; }
         this.disabled = true;
         aiProgress.classList.remove('hidden');
-        aiProgressText.textContent = 'Analyzing document with GPT-4o...';
+        aiProgressText.textContent = 'Reading the source and building a balanced, answer-checked quiz...';
         try {
           const formData = new FormData();
           formData.append('file', selectedFile);
           formData.append('code', roomCode);
           formData.append('token', token);
           formData.append('count', count);
+          formData.append('difficulty', document.getElementById('quizDifficulty').value);
+          formData.append('types', JSON.stringify(types));
           const response = await fetch('/api/quiz/generate', { method: 'POST', body: formData });
           const data = await response.json();
           if (!response.ok) throw new Error(data.error || 'Quiz generation failed.');
           currentQuiz = data.questions;
           renderQuizPreview(currentQuiz);
-          // Set quiz on server
-          socket.emit('quiz-set', { questions: currentQuiz }, function (r) {
-            if (!r?.ok) showStatus(r?.err || 'Could not save quiz.', 'error');
-          });
-          showStatus(`✨ Generated ${currentQuiz.length} questions successfully!`, 'success');
+          const saved = await new Promise((resolve) => socket.emit('quiz-set', { questions: currentQuiz }, resolve));
+          if (!saved?.ok) throw new Error(saved?.err || 'Could not save the quiz.');
+          showStatus(`Generated ${currentQuiz.length} validated questions with ${data.model || 'AI'}. Review them before launching.`, 'success');
         } catch (error) {
           showStatus(error.message || 'Quiz generation failed.', 'error');
         } finally {
           aiProgress.classList.add('hidden');
-          this.disabled = false;
+          this.disabled = !selectedFile || !joined || quizActive;
         }
       });
 
@@ -598,16 +619,18 @@
           const card = document.createElement('div');
           card.className = 'quiz-q-card';
           card.innerHTML = `
-            <div class="q-num">Question ${i + 1}</div>
+            <div class="q-num">Question ${i + 1} · ${escHtml((q.type || 'mcq').replace('_', ' '))} · ${escHtml(q.difficulty || 'medium')}</div>
             <div class="q-text">${escHtml(q.question)}</div>
-            <div class="quiz-options">
+            ${q.options?.length ? `<div class="quiz-options">
               ${q.options.map((opt, oi) => `
                 <div class="quiz-opt ${letters[oi] === q.answer ? 'correct' : ''}">
                   <span class="quiz-opt-letter">${letters[oi]}</span>
                   <span>${escHtml(opt.replace(/^[A-D]\.\s*/, ''))}</span>
                 </div>
               `).join('')}
-            </div>
+            </div>` : ''}
+            <div class="small quiz-answer-note"><strong>Reference answer:</strong> ${escHtml(q.answer)}</div>
+            ${q.rubric ? `<div class="small quiz-answer-note"><strong>Grading rubric:</strong> ${escHtml(q.rubric)}</div>` : ''}
             ${q.explanation ? `<div class="small" style="margin-top:8px;color:var(--success);">💡 ${escHtml(q.explanation)}</div>` : ''}
           `;
           quizPreview.appendChild(card);
@@ -633,6 +656,8 @@
           quizLiveBadge.classList.add('hidden');
           if (serverQuiz.results) renderQuizResults(serverQuiz.results);
         }
+        generateQuizBtn.disabled = !selectedFile || !joined || quizActive;
+        clearQuizBtn.disabled = quizActive;
         if (serverQuiz.responseCount !== undefined) {
           document.getElementById('quizResponded').textContent = serverQuiz.responseCount;
         }
@@ -648,6 +673,8 @@
           quizLiveBadge.classList.remove('hidden');
           document.getElementById('quizResponseCount').classList.remove('hidden');
           document.getElementById('quizResponded').textContent = '0';
+          generateQuizBtn.disabled = true;
+          clearQuizBtn.disabled = true;
           showStatus('🚀 Quiz launched! Students can now answer.', 'success');
           // switch to quiz tab
           document.querySelector('[data-tab="quiz"]').click();
@@ -662,12 +689,21 @@
           launchQuizBtn.classList.remove('hidden');
           quizLiveBadge.classList.add('hidden');
           if (r.results) renderQuizResults(r.results);
+          generateQuizBtn.disabled = !selectedFile || !joined;
+          clearQuizBtn.disabled = false;
           showStatus('Quiz ended. Results are in!', 'success');
         });
       });
 
       clearQuizBtn.addEventListener('click', function () {
         if (quizActive) { showStatus('End the quiz before clearing.', 'error'); return; }
+        socket.emit('quiz-clear', {}, function (response) {
+          if (!response?.ok) { showStatus(response?.err || 'Could not clear the quiz.', 'error'); return; }
+          resetQuizPreview();
+        });
+      });
+
+      function resetQuizPreview() {
         currentQuiz = null;
         quizPreview.innerHTML = '';
         quizPreview.classList.add('hidden');
@@ -676,7 +712,7 @@
         quizEmptyState.classList.remove('hidden');
         quizLiveBadge.classList.add('hidden');
         document.getElementById('quizResponseCount').classList.add('hidden');
-      });
+      }
 
       function renderQuizResults(results) {
         const container = document.getElementById('quizResults');
@@ -690,7 +726,7 @@
             <div class="small" style="min-width:90px;color:var(--text);">Q${i + 1}</div>
             <div class="quiz-result-bar"><div class="quiz-result-bar-fill" style="width:${r.pct}%"></div></div>
             <div class="quiz-result-pct">${r.pct}%</div>
-            <div class="small">(${r.correct}/${r.total})</div>
+            <div class="small">${r.type === 'short_answer' ? `${r.total} graded` : `(${r.correct}/${r.total})`}</div>
           `;
           list.appendChild(row);
         });
@@ -699,215 +735,15 @@
       function escHtml(str) {
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       }
+      window.classroomVideoConfig = {
+        role: 'teacher',
+        getCode: () => roomCode,
+        getTeacherToken: () => token,
+        getName: () => 'Teacher',
+        onState: (message, type) => showStatus(message, type)
+      };
 
-      /* ========= WebRTC Video Room ========= */
-      let localStream = null;
-      let peerConnections = {}; // peerId -> RTCPeerConnection
-      let micEnabled = true;
-      let camEnabled = true;
-      let inVideoRoom = false;
-
-      const iceConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
-
-      document.getElementById('videoRoomBtn').addEventListener('click', async function () {
-        if (inVideoRoom) return;
-        try {
-          localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-          inVideoRoom = true;
-          this.textContent = '📹 Video Room Active';
-          this.disabled = true;
-          document.getElementById('videoRoom').classList.remove('hidden');
-          addLocalTile();
-          // Join WebRTC room
-          socket.emit('webrtc-join', { name: 'Teacher' }, function (res) {
-            if (!res?.ok) { showStatus(res?.err || 'Could not join video room.', 'error'); return; }
-            res.peers.forEach(peer => createOffer(peer.peerId, peer.name));
-          });
-        } catch (err) {
-          showStatus('Camera/microphone access denied. ' + err.message, 'error');
-        }
-      });
-
-      document.getElementById('leaveVideoBtn').addEventListener('click', leaveVideo);
-      function leaveVideo() {
-        socket.emit('webrtc-leave');
-        Object.values(peerConnections).forEach(pc => pc.close());
-        peerConnections = {};
-        if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-        document.getElementById('videoRoom').classList.add('hidden');
-        document.getElementById('videoRoomBtn').textContent = '📹 Start Video Room';
-        document.getElementById('videoRoomBtn').disabled = false;
-        document.getElementById('videoGrid').innerHTML = `
-          <div class="video-waiting">
-            <div style="font-size:2rem;">📡</div>
-            <h3>Waiting for students to join...</h3>
-            <p>Students can click "Join Video" on their screen once you launch the room.</p>
-          </div>`;
-        inVideoRoom = false;
-        micEnabled = true; camEnabled = true;
-        updateCtrlBtnState();
-      }
-
-      function addLocalTile() {
-        const grid = document.getElementById('videoGrid');
-        grid.innerHTML = '';
-        const tile = document.createElement('div');
-        tile.className = 'video-tile local';
-        tile.id = 'tile-local';
-        const video = document.createElement('video');
-        video.autoplay = true;
-        video.muted = true;
-        video.playsInline = true;
-        video.srcObject = localStream;
-        const name = document.createElement('div');
-        name.className = 'video-name';
-        name.textContent = '👨‍🏫 You (Teacher)';
-        tile.append(video, name);
-        grid.appendChild(tile);
-        updatePeerCount();
-      }
-
-      function addRemoteTile(peerId, peerName) {
-        const grid = document.getElementById('videoGrid');
-        let tile = document.getElementById('tile-' + peerId);
-        if (!tile) {
-          tile = document.createElement('div');
-          tile.className = 'video-tile';
-          tile.id = 'tile-' + peerId;
-          const avatar = document.createElement('div');
-          avatar.className = 'video-avatar';
-          avatar.textContent = '👤';
-          tile.appendChild(avatar);
-          const nameEl = document.createElement('div');
-          nameEl.className = 'video-name';
-          nameEl.textContent = peerName || 'Student';
-          tile.appendChild(nameEl);
-          grid.appendChild(tile);
-          updatePeerCount();
-        }
-        return tile;
-      }
-
-      function removeRemoteTile(peerId) {
-        const tile = document.getElementById('tile-' + peerId);
-        if (tile) tile.remove();
-        updatePeerCount();
-      }
-
-      function updatePeerCount() {
-        const count = document.getElementById('videoGrid').querySelectorAll('.video-tile').length;
-        document.getElementById('videoPeerCount').textContent = count + ' participant' + (count !== 1 ? 's' : '');
-      }
-
-      function createPeerConnection(peerId, peerName) {
-        if (peerConnections[peerId]) return peerConnections[peerId];
-        const pc = new RTCPeerConnection(iceConfig);
-        peerConnections[peerId] = pc;
-        if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-        pc.onicecandidate = e => {
-          if (e.candidate) socket.emit('webrtc-ice', { to: peerId, candidate: e.candidate });
-        };
-        pc.ontrack = e => {
-          const tile = addRemoteTile(peerId, peerName);
-          let video = tile.querySelector('video');
-          if (!video) {
-            video = document.createElement('video');
-            video.autoplay = true;
-            video.playsInline = true;
-            tile.querySelector('.video-avatar')?.remove();
-            tile.insertBefore(video, tile.querySelector('.video-name'));
-          }
-          video.srcObject = e.streams[0];
-        };
-        pc.onconnectionstatechange = () => {
-          if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
-            delete peerConnections[peerId];
-            removeRemoteTile(peerId);
-          }
-        };
-        return pc;
-      }
-
-      async function createOffer(peerId, peerName) {
-        const pc = createPeerConnection(peerId, peerName);
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit('webrtc-offer', { to: peerId, offer: pc.localDescription });
-      }
-
-      socket.on('peer-joined', async ({ peerId, name }) => {
-        if (!inVideoRoom) return;
-        addRemoteTile(peerId, name);
-        await createOffer(peerId, name);
-      });
-
-      socket.on('webrtc-offer', async ({ from, offer, name }) => {
-        if (!inVideoRoom) return;
-        const pc = createPeerConnection(from, name);
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socket.emit('webrtc-answer', { to: from, answer: pc.localDescription });
-      });
-
-      socket.on('webrtc-answer', async ({ from, answer }) => {
-        const pc = peerConnections[from];
-        if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
-      });
-
-      socket.on('webrtc-ice', async ({ from, candidate }) => {
-        const pc = peerConnections[from];
-        if (pc) try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
-      });
-
-      socket.on('peer-left', ({ peerId }) => {
-        if (peerConnections[peerId]) { peerConnections[peerId].close(); delete peerConnections[peerId]; }
-        removeRemoteTile(peerId);
-      });
-
-      /* Video controls */
-      document.getElementById('toggleMicBtn').addEventListener('click', function () {
-        micEnabled = !micEnabled;
-        if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = micEnabled);
-        updateCtrlBtnState();
-      });
-      document.getElementById('toggleCamBtn').addEventListener('click', function () {
-        camEnabled = !camEnabled;
-        if (localStream) localStream.getVideoTracks().forEach(t => t.enabled = camEnabled);
-        const localVideo = document.querySelector('#tile-local video');
-        if (localVideo) localVideo.style.display = camEnabled ? '' : 'none';
-        updateCtrlBtnState();
-      });
-      document.getElementById('shareScreenBtn').addEventListener('click', async function () {
-        try {
-          const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-          const screenTrack = screenStream.getVideoTracks()[0];
-          Object.values(peerConnections).forEach(pc => {
-            const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-            if (sender) sender.replaceTrack(screenTrack);
-          });
-          screenTrack.addEventListener('ended', () => {
-            if (localStream) {
-              const camTrack = localStream.getVideoTracks()[0];
-              Object.values(peerConnections).forEach(pc => {
-                const sender = pc.getSenders().find(s => s.track?.kind === 'video');
-                if (sender && camTrack) sender.replaceTrack(camTrack);
-              });
-            }
-          });
-        } catch (e) {
-          showStatus('Screen share failed: ' + e.message, 'error');
-        }
-      });
-
-      function updateCtrlBtnState() {
-        const micBtn = document.getElementById('toggleMicBtn');
-        micBtn.innerHTML = (micEnabled ? '🎙️' : '🔇') + ' <span>' + (micEnabled ? 'Mic On' : 'Mic Off') + '</span>';
-        micBtn.classList.toggle('active', !micEnabled);
-        const camBtn = document.getElementById('toggleCamBtn');
-        camBtn.innerHTML = (camEnabled ? '📷' : '📵') + ' <span>' + (camEnabled ? 'Camera On' : 'Camera Off') + '</span>';
-        camBtn.classList.toggle('active', !camEnabled);
-      }
     </script>
+    <script type="module" src="/video-room.js"></script>
   </body>
 </html>

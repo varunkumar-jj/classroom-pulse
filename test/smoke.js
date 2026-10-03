@@ -68,7 +68,35 @@ async function waitForHealth(url, server) {
 
 async function main() {
   const port = await reservePort();
+  const aiPort = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
+  const aiCalls = [];
+  const mockAiServer = http.createServer(async (request, response) => {
+    let body = '';
+    for await (const chunk of request) body += chunk;
+    const call = JSON.parse(body);
+    aiCalls.push(call);
+    const isGrading = call.messages[0].content.includes('Grade each student response');
+    const content = isGrading
+      ? JSON.stringify({ grades: [{ questionIndex: 2, score: 90, feedback: 'Correct idea with one missing detail.' }] })
+      : JSON.stringify({
+          questions: [
+            { type: 'mcq', question: 'Which option is correct?', options: ['A. Correct', 'B. Incorrect', 'C. Incorrect', 'D. Incorrect'], answer: 'A', rubric: 'Choose the correct option.', explanation: 'The first option is supported.', difficulty: 'easy' },
+            { type: 'true_false', question: 'The source supports this statement.', options: [], answer: 'true', rubric: 'Answer true when supported.', explanation: 'This statement is supported.', difficulty: 'medium' },
+            { type: 'short_answer', question: 'Explain the core idea.', options: [], answer: 'A supported explanation.', rubric: 'Award credit for identifying the main idea and evidence.', explanation: 'The answer should include the central idea.', difficulty: 'hard' }
+          ]
+        });
+    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.end(JSON.stringify({
+      id: 'chatcmpl-smoke',
+      object: 'chat.completion',
+      created: Date.now(),
+      model: 'gpt-4o-mini',
+      choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 }
+    }));
+  });
+  await new Promise((resolve) => mockAiServer.listen(aiPort, '127.0.0.1', resolve));
   const vapidKeys = webpush.generateVAPIDKeys();
   const server = spawn(process.execPath, [path.join(root, 'server.js')], {
     cwd: root,
@@ -77,7 +105,13 @@ async function main() {
       PORT: String(port),
       VAPID_PUBLIC_KEY: vapidKeys.publicKey,
       VAPID_PRIVATE_KEY: vapidKeys.privateKey,
-      VAPID_SUBJECT: 'mailto:smoke-test@example.com'
+      VAPID_SUBJECT: 'mailto:smoke-test@example.com',
+      OPENAI_API_KEY: 'smoke-test-openai-key',
+      OPENAI_BASE_URL: `http://127.0.0.1:${aiPort}/v1`,
+      OPENAI_MODEL: 'gpt-4o-mini',
+      LIVEKIT_URL: 'wss://livekit.example.test',
+      LIVEKIT_API_KEY: 'smoke-test-livekit-key',
+      LIVEKIT_API_SECRET: 'smoke-test-livekit-secret-that-is-long-enough'
     },
     stdio: ['ignore', 'pipe', 'pipe']
   });
@@ -92,7 +126,8 @@ async function main() {
     assert.deepEqual(await health.json(), { status: 'ok' });
 
     for (const page of [
-      '/home.html', '/student.html', '/teacher.html', '/report.html', '/styles.css',
+      '/home.html', '/student.html', '/teacher.html', '/report.html', '/styles.css', '/video-room.js',
+      '/vendor/livekit-client/livekit-client.esm.mjs',
       '/service-worker.js', '/vendor/qr-scanner/qr-scanner.min.js',
       '/vendor/qr-scanner/qr-scanner-worker.min.js'
     ]) {
@@ -107,6 +142,41 @@ async function main() {
     const token = new URLSearchParams(teacherUrl.hash.slice(1)).get('token');
     assert.ok(roomCode && token, 'teacher URL should contain room credentials');
     assert.equal(teacherUrl.searchParams.has('token'), false, 'teacher token should not be sent in the page request URL');
+
+    const unauthorizedVideoToken = await fetch(`${baseUrl}/api/video/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: roomCode, role: 'teacher', name: 'Teacher', teacherToken: 'invalid' })
+    });
+    assert.equal(unauthorizedVideoToken.status, 403, 'LiveKit teacher tokens should require teacher authorization');
+    const teacherVideoTokenResponse = await fetch(`${baseUrl}/api/video/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: roomCode, role: 'teacher', name: 'Teacher', teacherToken: token })
+    });
+    assert.equal(teacherVideoTokenResponse.status, 200, 'authorized teacher should receive a LiveKit access token');
+    const teacherVideoToken = await teacherVideoTokenResponse.json();
+    assert.equal(teacherVideoToken.url, 'wss://livekit.example.test');
+    const videoClaims = JSON.parse(Buffer.from(teacherVideoToken.token.split('.')[1], 'base64url').toString());
+    assert.equal(videoClaims.video.room, roomCode, 'LiveKit token must be scoped to the classroom room');
+    assert.equal(videoClaims.video.roomJoin, true, 'LiveKit token must allow room joining');
+
+    const sourceFile = new Blob([
+      'A classroom source describes the core idea, supporting evidence, and why those details matter. '.repeat(4)
+    ], { type: 'text/plain' });
+    const quizForm = new FormData();
+    quizForm.append('file', sourceFile, 'lesson.txt');
+    quizForm.append('code', roomCode);
+    quizForm.append('token', token);
+    quizForm.append('count', '3');
+    quizForm.append('difficulty', 'mixed');
+    quizForm.append('types', JSON.stringify(['mcq', 'true_false', 'short_answer']));
+    const generatedQuizResponse = await fetch(`${baseUrl}/api/quiz/generate`, { method: 'POST', body: quizForm });
+    assert.equal(generatedQuizResponse.status, 200, 'AI quiz generation should return a validated mixed-format quiz');
+    const generatedQuiz = await generatedQuizResponse.json();
+    assert.deepEqual(generatedQuiz.questions.map((question) => question.type), ['mcq', 'true_false', 'short_answer']);
+    assert.ok(generatedQuiz.questions[2].rubric, 'generated short-answer questions should include an AI grading rubric');
+    assert.equal(generatedQuiz.model, 'gpt-4o-mini', 'generation response should identify the configured model');
 
     const pushKey = await fetch(`${baseUrl}/api/push/key`);
     assert.equal(pushKey.status, 200, 'configured push service should return its public VAPID key');
@@ -220,33 +290,46 @@ async function main() {
     assert.equal(report.answeredQsCount, 1, 'report should include the answered sample question');
     assert.equal(report.unansweredQuestions.length, 0, 'answered question should not remain unanswered');
 
-    const quizQuestions = [{
-      question: 'Which option is correct?',
-      options: ['A. Correct', 'B. Incorrect', 'C. Incorrect', 'D. Incorrect'],
-      answer: 'A',
-      explanation: 'The first option is correct.'
-    }];
-    const quizSet = await emitAck(teacher, 'quiz-set', { questions: quizQuestions });
+    const quizSet = await emitAck(teacher, 'quiz-set', { questions: generatedQuiz.questions });
     assert.equal(quizSet.ok, true, 'teacher should be able to set a quiz');
     const quizStart = new Promise((resolve) => students[0].once('quiz-start', resolve));
     const quizLaunch = await emitAck(teacher, 'quiz-launch', {});
     assert.equal(quizLaunch.ok, true, 'teacher should be able to launch the quiz');
+    const activeQuizReplacement = await emitAck(teacher, 'quiz-set', { questions: generatedQuiz.questions });
+    assert.equal(activeQuizReplacement.ok, false, 'active quizzes should not be replaced');
     const studentQuiz = await quizStart;
     assert.equal(studentQuiz.active, true, 'students should receive the active quiz');
     assert.equal(studentQuiz.questions[0].answer, undefined, 'student quiz payload must not reveal the answer key');
-    assert.deepEqual(studentQuiz.questions[0].options, quizQuestions[0].options, 'students should receive the question options');
-    const quizSubmission = await emitAck(students[0], 'quiz-submit', { answers: ['A'] });
-    assert.equal(quizSubmission.ok, true, 'student should be able to submit quiz answers');
-    assert.equal(quizSubmission.scored[0].correct, true, 'quiz submission should be scored correctly');
+    assert.equal(studentQuiz.questions[2].rubric, undefined, 'student quiz payload must not reveal the grading rubric');
+    assert.deepEqual(studentQuiz.questions[0].options, generatedQuiz.questions[0].options, 'students should receive multiple-choice options');
+    assert.deepEqual(await emitAck(students[1], 'quiz-submit', { answers: ['A'] }), {
+      ok: false,
+      err: 'Submit one answer for each quiz question.'
+    }, 'incomplete quiz submissions should be rejected');
+    const quizSubmission = await emitAck(students[0], 'quiz-submit', { answers: ['A', 'true', 'The core idea is supported by evidence.'] });
+    assert.equal(quizSubmission.ok, true, 'student should be able to submit all question types');
+    assert.equal(quizSubmission.scored[0].correct, true, 'multiple-choice answer should be scored correctly');
+    assert.equal(quizSubmission.scored[1].correct, true, 'true/false answer should be scored correctly');
+    assert.equal(quizSubmission.scored[2].score, 90, 'short answer should receive the AI rubric score');
+    assert.equal(quizSubmission.scored[2].feedback, 'Correct idea with one missing detail.');
+    const duplicateQuizSubmission = await emitAck(students[0], 'quiz-submit', { answers: ['A', 'true', 'another answer'] });
+    assert.equal(duplicateQuizSubmission.ok, false, 'students should not submit a quiz more than once');
+    const blankQuizSubmission = await emitAck(students[1], 'quiz-submit', { answers: [null, null, null] });
+    assert.equal(blankQuizSubmission.ok, true, 'students may submit unanswered items without breaking grading');
+    assert.equal(blankQuizSubmission.scored[2].score, 0, 'blank short answers should receive zero without an AI score');
     const quizEnd = await emitAck(teacher, 'quiz-end', {});
     assert.equal(quizEnd.ok, true, 'teacher should be able to end the quiz');
     assert.equal(quizEnd.results[0].correct, 1, 'teacher results should include correct submissions');
-    assert.equal(quizEnd.results[0].total, 1, 'teacher results should count submitted answers');
+    assert.equal(quizEnd.results[0].total, 2, 'teacher results should count submitted answers');
+    assert.equal(quizEnd.results[2].pct, 45, 'teacher results should aggregate AI-graded and blank short answers');
+    assert.equal(aiCalls.length, 2, 'quiz generation and short-answer grading should both use the configured AI provider');
+    const clearedQuiz = await emitAck(teacher, 'quiz-clear', {});
+    assert.equal(clearedQuiz.ok, true, 'teacher should be able to clear an ended quiz');
 
     const malformedTopics = await emitAck(teacher, 'set-topics', { topics: 'not-an-array' });
     assert.equal(malformedTopics.ok, false, 'malformed topic payload should be rejected without crashing');
 
-    console.log(`PASS: health/static routes; room QR and push authorization; teacher room; 50 students; 50 random votes (${JSON.stringify(expected)}); question/upvotes; topics; moderation; re-explain; report; student-safe quiz launch/scoring/results; invalid-input checks.`);
+    console.log(`PASS: health/static routes; room QR and push authorization; authorized LiveKit room tokens; validated AI quiz generation; teacher room; 50 students; 50 random votes (${JSON.stringify(expected)}); question/upvotes; topics; moderation; re-explain; report; student-safe mixed quiz; objective and mock-AI short-answer grading; invalid-input checks.`);
   } catch (error) {
     console.error(error);
     if (serverOutput) console.error(serverOutput);
@@ -254,6 +337,7 @@ async function main() {
   } finally {
     sockets.forEach((socket) => socket.disconnect());
     server.kill();
+    mockAiServer.close();
   }
 }
 

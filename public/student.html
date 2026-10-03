@@ -44,7 +44,7 @@
           <div id="quizResultView" class="hidden" style="margin-top:20px;">
             <div class="quiz-score-ring">
               <div class="quiz-score-num" id="quizScoreNum">—</div>
-              <div class="quiz-score-label">questions correct</div>
+              <div class="quiz-score-label">overall score</div>
             </div>
             <div id="quizAnswerReview" style="display:grid;gap:10px;"></div>
             <button id="quizCloseBtn" class="primary" style="width:100%;margin-top:16px;">Close</button>
@@ -59,6 +59,7 @@
             <span class="brand-mark" style="font-size:14px;">📹</span>
             <h2>Video Room</h2>
             <span id="videoPeerCount" class="badge">1 participant</span>
+            <span id="videoConnectionStatus" class="badge">Connecting</span>
           </div>
           <button id="leaveVideoBtn" class="ctrl-btn end">📵 <span>Leave</span></button>
         </div>
@@ -231,6 +232,9 @@
       socket.on('room-update', function (room) {
         if (!room) return;
         currentTopic.textContent = room.currentTopic || 'General';
+        if (room.quiz?.active && room.quiz.questions?.length && !quizQuestions.length) {
+          openQuiz(room.quiz.questions);
+        }
         const active = Boolean(room.reexplain);
         if (active && !reexplainActive) reexplainAnswered = false;
         reexplainActive = active;
@@ -305,7 +309,10 @@
         quizSubmitted = false;
         document.getElementById('liveQuizOverlay').classList.remove('hidden');
         document.getElementById('quizResultView').classList.add('hidden');
-        document.getElementById('quizSubmitBtn').classList.remove('hidden');
+        const submitButton = document.getElementById('quizSubmitBtn');
+        submitButton.classList.remove('hidden');
+        submitButton.disabled = false;
+        submitButton.textContent = 'Submit Answers ✓';
         document.querySelector('.quiz-footer').style.display = '';
         renderQuizQuestion();
         showStatus('📋 A quiz has started! Answer when ready.', 'success');
@@ -319,21 +326,36 @@
         document.getElementById('quizQText').textContent = q.question;
         const optContainer = document.getElementById('quizOptions');
         optContainer.innerHTML = '';
-        q.options.forEach((opt, i) => {
+        if (q.type === 'short_answer') {
+          const input = document.createElement('textarea');
+          input.className = 'live-short-answer';
+          input.maxLength = 1000;
+          input.rows = 4;
+          input.placeholder = 'Write your answer...';
+          input.setAttribute('aria-label', `Answer for question ${currentQIndex + 1}`);
+          input.value = quizAnswers[currentQIndex] || '';
+          input.disabled = quizSubmitted;
+          input.addEventListener('input', () => { quizAnswers[currentQIndex] = input.value; });
+          optContainer.appendChild(input);
+        }
+        const options = q.type === 'true_false'
+          ? [{ key: 'true', label: 'True' }, { key: 'false', label: 'False' }]
+          : (q.options || []).map((label, i) => ({ key: letters[i], label: label.replace(/^[A-D]\.\s*/, '') }));
+        options.forEach(({ key, label }) => {
           const btn = document.createElement('button');
-          btn.className = 'live-opt-btn' + (quizAnswers[currentQIndex] === letters[i] ? ' selected' : '');
+          btn.className = 'live-opt-btn' + (quizAnswers[currentQIndex] === key ? ' selected' : '');
           btn.disabled = quizSubmitted;
-          btn.innerHTML = `<span class="live-opt-key">${letters[i]}</span><span>${escHtml(opt.replace(/^[A-D]\.\s*/, ''))}</span>`;
+          btn.innerHTML = `<span class="live-opt-key">${escHtml(key === 'true' ? 'T' : key === 'false' ? 'F' : key)}</span><span>${escHtml(label)}</span>`;
           btn.addEventListener('click', function () {
             if (quizSubmitted) return;
-            quizAnswers[currentQIndex] = letters[i];
+            quizAnswers[currentQIndex] = key;
             document.querySelectorAll('.live-opt-btn').forEach(b => b.classList.remove('selected'));
             this.classList.add('selected');
           });
           optContainer.appendChild(btn);
         });
-        document.getElementById('quizPrevBtn').disabled = currentQIndex === 0;
-        document.getElementById('quizNextBtn').disabled = currentQIndex === quizQuestions.length - 1;
+        document.getElementById('quizPrevBtn').disabled = quizSubmitted || currentQIndex === 0;
+        document.getElementById('quizNextBtn').disabled = quizSubmitted || currentQIndex === quizQuestions.length - 1;
       }
 
       document.getElementById('quizPrevBtn').addEventListener('click', function () {
@@ -344,17 +366,29 @@
       });
 
       document.getElementById('quizSubmitBtn').addEventListener('click', function () {
+        const submitButton = this;
         quizSubmitted = true;
-        this.disabled = true;
+        submitButton.disabled = true;
+        submitButton.textContent = 'AI grading...';
+        renderQuizQuestion();
         socket.emit('quiz-submit', { answers: quizAnswers }, function (res) {
-          if (!res?.ok) { showStatus(res?.err || 'Could not submit quiz.', 'error'); quizSubmitted = false; this.disabled = false; return; }
+          if (!res?.ok) {
+            showStatus(res?.err || 'Could not submit quiz.', 'error');
+            quizSubmitted = false;
+            submitButton.disabled = false;
+            submitButton.textContent = 'Submit Answers ✓';
+            renderQuizQuestion();
+            return;
+          }
           showQuizResults(res.scored);
         });
       });
 
       function showQuizResults(scored) {
-        const correct = scored.filter(s => s.correct).length;
-        document.getElementById('quizScoreNum').textContent = correct + '/' + scored.length;
+        const average = scored.length
+          ? Math.round(scored.reduce((sum, result) => sum + result.score, 0) / scored.length)
+          : 0;
+        document.getElementById('quizScoreNum').textContent = average + '%';
         document.querySelector('.quiz-footer').style.display = 'none';
         document.getElementById('quizSubmitBtn').classList.add('hidden');
         document.getElementById('quizResultView').classList.remove('hidden');
@@ -364,18 +398,19 @@
           const q = quizQuestions[i];
           const div = document.createElement('div');
           div.className = 'quiz-q-card';
+          const answerReview = q.type === 'short_answer'
+            ? `<div class="small"><strong>Reference answer:</strong> ${escHtml(s.referenceAnswer)}</div><div class="small"><strong>Feedback:</strong> ${escHtml(s.feedback)}</div>`
+            : `<div class="small"><strong>Correct answer:</strong> ${escHtml(s.correctAnswer === 'true' ? 'True' : s.correctAnswer === 'false' ? 'False' : s.correctAnswer)}</div>`;
+          const choiceReview = q.type === 'mcq'
+            ? `<div class="quiz-options">${q.options.map((opt, oi) => `
+                <div class="quiz-opt ${letters[oi] === s.correctAnswer ? 'correct' : ''}">
+                  <span class="quiz-opt-letter">${letters[oi]}</span><span>${escHtml(opt.replace(/^[A-D]\.\s*/, ''))}</span>
+                </div>`).join('')}</div>`
+            : '';
           div.innerHTML = `
-            <div class="q-num">Q${i + 1} ${s.correct ? '✅' : '❌'}</div>
+            <div class="q-num">Q${i + 1} · ${s.score}% · ${s.correct ? 'Correct' : 'Review'}</div>
             <div class="q-text">${escHtml(q.question)}</div>
-            <div class="quiz-options">
-              ${q.options.map((opt, oi) => `
-                <div class="quiz-opt ${letters[oi] === s.correctAnswer ? 'correct' : (letters[oi] === quizAnswers[i] && !s.correct ? '' : '')}">
-                  <span class="quiz-opt-letter">${letters[oi]}</span>
-                  <span>${escHtml(opt.replace(/^[A-D]\.\s*/, ''))}</span>
-                  ${letters[oi] === s.correctAnswer ? ' ✓' : ''}
-                </div>
-              `).join('')}
-            </div>
+            ${choiceReview}${answerReview}
             ${s.explanation ? `<div class="small" style="margin-top:8px;color:var(--success);">💡 ${escHtml(s.explanation)}</div>` : ''}
           `;
           review.appendChild(div);
@@ -388,200 +423,30 @@
 
       socket.on('quiz-start', function (quizData) {
         if (!quizData || !quizData.questions) return;
-        openQuiz(quizData.questions);
+        const overlay = document.getElementById('liveQuizOverlay');
+        if (!quizQuestions.length || quizSubmitted || overlay.classList.contains('hidden')) {
+          openQuiz(quizData.questions);
+        }
       });
 
       socket.on('quiz-ended', function () {
         if (!quizSubmitted) {
-          showStatus('⏹ Quiz has ended. Submitting your answers...', 'info');
-          if (!quizSubmitted && quizQuestions.length) {
-            socket.emit('quiz-submit', { answers: quizAnswers }, function (res) {
-              if (res?.ok) showQuizResults(res.scored);
-            });
-          }
+          quizSubmitted = true;
+          document.querySelector('.quiz-footer').style.display = 'none';
+          showStatus('The teacher ended this quiz before your answers were submitted.', 'info');
         }
       });
-
-      /* ===== WebRTC Video Room (Student) ===== */
-      let localStream = null;
-      let peerConnections = {};
-      let micEnabled = true;
-      let camEnabled = true;
-      let inVideoRoom = false;
-      let myDisplayName = '';
-
-      const iceConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
-
-      joinVideoBtn.addEventListener('click', async function () {
-        if (inVideoRoom || !joined) return;
-        try {
-          localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
-          inVideoRoom = true;
-          this.textContent = '📹 In Video Room';
-          this.disabled = true;
-          document.getElementById('videoRoom').classList.remove('hidden');
-          myDisplayName = document.getElementById('studentName').value.trim() || 'Student';
-          addLocalTile();
-          socket.emit('webrtc-join', { name: myDisplayName }, function (res) {
-            if (!res?.ok) { showStatus(res?.err || 'Could not join video room.', 'error'); return; }
-            res.peers.forEach(peer => createOffer(peer.peerId, peer.name));
-          });
-        } catch (err) {
-          showStatus('Camera/microphone access denied. ' + err.message, 'error');
-        }
-      });
-
-      document.getElementById('leaveVideoBtn').addEventListener('click', leaveVideo);
-      function leaveVideo() {
-        socket.emit('webrtc-leave');
-        Object.values(peerConnections).forEach(pc => pc.close());
-        peerConnections = {};
-        if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
-        document.getElementById('videoRoom').classList.add('hidden');
-        joinVideoBtn.textContent = '📹 Join Video';
-        joinVideoBtn.disabled = false;
-        inVideoRoom = false;
-        micEnabled = true; camEnabled = true;
-        updateCtrlBtnState();
-      }
-
-      function addLocalTile() {
-        const grid = document.getElementById('videoGrid');
-        grid.innerHTML = '';
-        const tile = document.createElement('div');
-        tile.className = 'video-tile local';
-        tile.id = 'tile-local';
-        const video = document.createElement('video');
-        video.autoplay = true; video.muted = true; video.playsInline = true;
-        video.srcObject = localStream;
-        const name = document.createElement('div');
-        name.className = 'video-name';
-        name.textContent = '👤 ' + (myDisplayName || 'You');
-        tile.append(video, name);
-        grid.appendChild(tile);
-        updatePeerCount();
-      }
-
-      function addRemoteTile(peerId, peerName) {
-        const grid = document.getElementById('videoGrid');
-        let tile = document.getElementById('tile-' + peerId);
-        if (!tile) {
-          tile = document.createElement('div');
-          tile.className = 'video-tile';
-          tile.id = 'tile-' + peerId;
-          const avatar = document.createElement('div');
-          avatar.className = 'video-avatar';
-          avatar.textContent = peerName === 'Teacher' ? '👨‍🏫' : '👤';
-          tile.appendChild(avatar);
-          const nameEl = document.createElement('div');
-          nameEl.className = 'video-name';
-          nameEl.textContent = peerName || 'Participant';
-          tile.appendChild(nameEl);
-          grid.appendChild(tile);
-          updatePeerCount();
-        }
-        return tile;
-      }
-
-      function removeRemoteTile(peerId) {
-        const tile = document.getElementById('tile-' + peerId);
-        if (tile) tile.remove();
-        updatePeerCount();
-      }
-
-      function updatePeerCount() {
-        const count = document.getElementById('videoGrid').querySelectorAll('.video-tile').length;
-        document.getElementById('videoPeerCount').textContent = count + ' participant' + (count !== 1 ? 's' : '');
-      }
-
-      function createPeerConnection(peerId, peerName) {
-        if (peerConnections[peerId]) return peerConnections[peerId];
-        const pc = new RTCPeerConnection(iceConfig);
-        peerConnections[peerId] = pc;
-        if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
-        pc.onicecandidate = e => {
-          if (e.candidate) socket.emit('webrtc-ice', { to: peerId, candidate: e.candidate });
-        };
-        pc.ontrack = e => {
-          const tile = addRemoteTile(peerId, peerName);
-          let video = tile.querySelector('video');
-          if (!video) {
-            video = document.createElement('video');
-            video.autoplay = true; video.playsInline = true;
-            tile.querySelector('.video-avatar')?.remove();
-            tile.insertBefore(video, tile.querySelector('.video-name'));
-          }
-          video.srcObject = e.streams[0];
-        };
-        pc.onconnectionstatechange = () => {
-          if (['disconnected','failed','closed'].includes(pc.connectionState)) {
-            delete peerConnections[peerId];
-            removeRemoteTile(peerId);
-          }
-        };
-        return pc;
-      }
-
-      async function createOffer(peerId, peerName) {
-        const pc = createPeerConnection(peerId, peerName);
-        const offer = await pc.createOffer();
-        await pc.setLocalDescription(offer);
-        socket.emit('webrtc-offer', { to: peerId, offer: pc.localDescription });
-      }
-
-      socket.on('peer-joined', async ({ peerId, name }) => {
-        if (!inVideoRoom) return;
-        addRemoteTile(peerId, name);
-        await createOffer(peerId, name);
-      });
-
-      socket.on('webrtc-offer', async ({ from, offer, name }) => {
-        if (!inVideoRoom) return;
-        const pc = createPeerConnection(from, name);
-        await pc.setRemoteDescription(new RTCSessionDescription(offer));
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        socket.emit('webrtc-answer', { to: from, answer: pc.localDescription });
-      });
-
-      socket.on('webrtc-answer', async ({ from, answer }) => {
-        const pc = peerConnections[from];
-        if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
-      });
-
-      socket.on('webrtc-ice', async ({ from, candidate }) => {
-        const pc = peerConnections[from];
-        if (pc) try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
-      });
-
-      socket.on('peer-left', ({ peerId }) => {
-        if (peerConnections[peerId]) { peerConnections[peerId].close(); delete peerConnections[peerId]; }
-        removeRemoteTile(peerId);
-      });
-
-      document.getElementById('toggleMicBtn').addEventListener('click', function () {
-        micEnabled = !micEnabled;
-        if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = micEnabled);
-        updateCtrlBtnState();
-      });
-      document.getElementById('toggleCamBtn').addEventListener('click', function () {
-        camEnabled = !camEnabled;
-        if (localStream) localStream.getVideoTracks().forEach(t => t.enabled = camEnabled);
-        updateCtrlBtnState();
-      });
-
-      function updateCtrlBtnState() {
-        const micBtn = document.getElementById('toggleMicBtn');
-        micBtn.innerHTML = (micEnabled ? '🎙️' : '🔇') + ' <span>' + (micEnabled ? 'Mic On' : 'Mic Off') + '</span>';
-        micBtn.classList.toggle('active', !micEnabled);
-        const camBtn = document.getElementById('toggleCamBtn');
-        camBtn.innerHTML = (camEnabled ? '📷' : '📵') + ' <span>' + (camEnabled ? 'Camera On' : 'Camera Off') + '</span>';
-        camBtn.classList.toggle('active', !camEnabled);
-      }
 
       function escHtml(str) {
         return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
       }
+      window.classroomVideoConfig = {
+        role: 'student',
+        getCode: () => roomInput.value.trim().toUpperCase(),
+        getName: () => document.getElementById('studentName').value.trim() || 'Student',
+        onState: (message, type) => showStatus(message, type)
+      };
     </script>
+    <script type="module" src="/video-room.js"></script>
   </body>
 </html>
