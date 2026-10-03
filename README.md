@@ -33,6 +33,33 @@ or computers. Votes and questions appear on the teacher dashboard over
 Socket.IO in real time. The teacher dashboard URL contains a private token:
 share the student link, not the teacher link.
 
+The teacher dashboard also displays a QR code for the student join link.
+Students can scan it from the home page on mobile browsers with camera access,
+or enter the four-character code if scanning is unavailable. Camera access
+requires HTTPS (except on localhost).
+
+## Teacher phone alerts
+
+On the teacher dashboard, choose **Enable phone alerts** and allow browser
+notifications. New student questions and a classroom confusion spike trigger
+a push notification; supported devices may also vibrate. The dashboard can
+also vibrate and show an alert while it is open. Push alerts require HTTPS and
+VAPID keys; without them, the button explains that server setup is needed.
+
+Generate a VAPID key pair locally with:
+
+```sh
+node -e "console.log(require('web-push').generateVAPIDKeys())"
+```
+
+Configure `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` (for
+example, `mailto:admin@yourdomain.com`) as environment variables on the server.
+Keep the private key secret and stable between deployments, then restart the
+service. Push subscriptions are held in the same in-memory room as the class,
+so a server restart or room expiry requires enabling alerts again. Notification
+and vibration behavior depends on browser and device settings; on iOS, web push
+requires adding the site to the Home Screen.
+
 ## Deploy the Node app
 
 The existing app needs a Node host that supports long-lived Socket.IO

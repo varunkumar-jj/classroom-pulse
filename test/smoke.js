@@ -36,12 +36,12 @@ function emitAck(socket, event, payload) {
   });
 }
 
-function waitForRoomUpdate(socket, predicate) {
+function waitForRoomUpdate(socket, predicate, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       socket.off('room-update', onUpdate);
       reject(new Error('Room update timed out'));
-    }, 5000);
+    }, timeoutMs);
     function onUpdate(room) {
       if (!predicate(room)) return;
       clearTimeout(timer);
@@ -83,7 +83,11 @@ async function main() {
     const health = await fetch(`${baseUrl}/healthz`);
     assert.deepEqual(await health.json(), { status: 'ok' });
 
-    for (const page of ['/home.html', '/student.html', '/teacher.html', '/report.html', '/styles.css']) {
+    for (const page of [
+      '/home.html', '/student.html', '/teacher.html', '/report.html', '/styles.css',
+      '/service-worker.js', '/vendor/qr-scanner/qr-scanner.min.js',
+      '/vendor/qr-scanner/qr-scanner-worker.min.js'
+    ]) {
       const response = await fetch(`${baseUrl}${page}`);
       assert.equal(response.status, 200, `${page} should be served`);
     }
@@ -95,6 +99,18 @@ async function main() {
     const token = new URLSearchParams(teacherUrl.hash.slice(1)).get('token');
     assert.ok(roomCode && token, 'teacher URL should contain room credentials');
     assert.equal(teacherUrl.searchParams.has('token'), false, 'teacher token should not be sent in the page request URL');
+
+    const qr = await fetch(`${baseUrl}/api/rooms/${roomCode}/qr.svg`);
+    assert.equal(qr.status, 200, 'active rooms should have a scannable join QR');
+    assert.match(await qr.text(), /<svg/, 'join QR should be returned as SVG');
+    const unknownQr = await fetch(`${baseUrl}/api/rooms/NOPE/qr.svg`);
+    assert.equal(unknownQr.status, 404, 'unknown rooms should not produce join QR codes');
+    const unauthorizedPush = await fetch(`${baseUrl}/api/push/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: roomCode, token: 'invalid', subscription: {} })
+    });
+    assert.equal(unauthorizedPush.status, 403, 'push subscriptions should require the teacher token');
 
     const teacher = await connect(baseUrl);
     sockets.push(teacher);
@@ -132,9 +148,8 @@ async function main() {
     assert.equal(smallSample.lostPct, null, 'small samples should be marked as insufficient');
     assert.ok(earlyReport.report.history.every((sample) => sample.marker || sample.total > 0), 'empty polling intervals should not pollute report history');
 
+    const thresholdUpdate = waitForRoomUpdate(teacher, (snapshot) => Boolean(snapshot.reexplain), 10000);
     await Promise.all(students.slice(1, 3).map((student) => emitAck(student, 'vote', { vote: 'lost' })));
-    const thresholdUpdate = waitForRoomUpdate(teacher, (snapshot) => Boolean(snapshot.reexplain));
-    await emitAck(teacher, 'next-topic', {});
     const triggered = await thresholdUpdate;
     assert.equal(triggered.totalVotes, 3, 'confusion threshold should only be considered with three votes');
     assert.ok(triggered.reexplain, 'reaching the threshold at three confused votes should start a re-explain prompt');
@@ -182,7 +197,7 @@ async function main() {
     const malformedTopics = await emitAck(teacher, 'set-topics', { topics: 'not-an-array' });
     assert.equal(malformedTopics.ok, false, 'malformed topic payload should be rejected without crashing');
 
-    console.log(`PASS: health/static routes; teacher room; 50 students; 50 random votes (${JSON.stringify(expected)}); question/upvotes; topics; moderation; re-explain; report and invalid-input checks.`);
+    console.log(`PASS: health/static routes; room QR and push authorization; teacher room; 50 students; 50 random votes (${JSON.stringify(expected)}); question/upvotes; topics; moderation; re-explain; report and invalid-input checks.`);
   } catch (error) {
     console.error(error);
     if (serverOutput) console.error(serverOutput);

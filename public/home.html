@@ -13,6 +13,11 @@
         <p class="eyebrow" style="margin-top: 34px;">Make every lesson responsive</p>
         <h1>See the room.<br /><span>Teach the moment.</span></h1>
         <p class="hero-copy">Quick check-ins help teachers spot confusion, make space for questions, and keep every student in sync.</p>
+        <div class="pulse-highlights" aria-label="Classroom Pulse features">
+          <span><i></i>Live understanding</span>
+          <span><i></i>Quiet questions</span>
+          <span><i></i>One-scan joining</span>
+        </div>
       </div>
 
       <div class="grid">
@@ -30,6 +35,11 @@
             Room code
             <input id="roomCode" maxlength="4" minlength="4" pattern="[A-HJ-NP-Z2-9]{4}" autocomplete="off" autocapitalize="characters" placeholder="e.g. K7MP" aria-describedby="roomHint" required />
           </label>
+            <button id="scanButton" type="button">Scan classroom QR</button>
+            <div id="scannerPanel" class="scanner-panel hidden">
+              <video id="scannerVideo" autoplay playsinline muted aria-label="Camera view for scanning a room QR code"></video>
+              <button id="stopScanButton" type="button">Stop camera</button>
+            </div>
             <div id="roomHint" class="form-hint"><span>Letters and numbers, case-insensitive</span><span id="roomLength">0 / 4</span></div>
             <button id="joinButton" type="submit" class="primary" style="width: 100%; margin-top: 16px;">Join classroom <span aria-hidden="true">→</span></button>
           </form>
@@ -47,11 +57,16 @@
       </div>
     </main>
 
-    <script>
+    <script type="module">
+      import QrScanner from '/vendor/qr-scanner/qr-scanner.min.js';
+
       const roomInput = document.getElementById('roomCode');
       const joinButton = document.getElementById('joinButton');
       const statusBanner = document.getElementById('statusBanner');
       const connectionBadge = document.getElementById('connectionBadge');
+      const scannerPanel = document.getElementById('scannerPanel');
+      const scannerVideo = document.getElementById('scannerVideo');
+      let qrScanner = null;
 
       roomInput.addEventListener('input', function () {
         const start = this.selectionStart;
@@ -69,6 +84,57 @@
         connectionBadge.textContent = 'Service unavailable';
         connectionBadge.classList.add('disconnected');
       });
+
+      function stopScanner() {
+        if (qrScanner) {
+          qrScanner.stop();
+          qrScanner.destroy();
+          qrScanner = null;
+        }
+        scannerPanel.classList.add('hidden');
+      }
+
+      document.getElementById('scanButton').addEventListener('click', async function () {
+        if (qrScanner) return;
+        if (!navigator.mediaDevices?.getUserMedia || !window.isSecureContext) {
+          statusBanner.textContent = 'Camera scanning requires a secure connection and browser camera support. Enter the room code instead.';
+          statusBanner.className = 'status-banner error';
+          return;
+        }
+        try {
+          scannerPanel.classList.remove('hidden');
+          qrScanner = new QrScanner(scannerVideo, function (result) {
+            try {
+              const raw = result.data.trim();
+              let code = raw.toUpperCase();
+              try {
+                const scannedUrl = new URL(raw);
+                if (scannedUrl.origin !== window.location.origin || scannedUrl.pathname !== '/student.html') {
+                  throw new Error('This QR code is not a Classroom Pulse room link.');
+                }
+                code = (scannedUrl.searchParams.get('room') || '').toUpperCase();
+              } catch (error) {
+                if (raw.includes('://')) throw error;
+              }
+              if (!/^[A-HJ-NP-Z2-9]{4}$/.test(code)) {
+                throw new Error('This QR code does not contain a valid room code.');
+              }
+              stopScanner();
+              window.location.href = '/student.html?room=' + encodeURIComponent(code);
+            } catch (error) {
+              stopScanner();
+              statusBanner.textContent = error.message || 'Could not scan this QR code.';
+              statusBanner.className = 'status-banner error';
+            }
+          }, { preferredCamera: 'environment', highlightScanRegion: true });
+          await qrScanner.start();
+        } catch (error) {
+          stopScanner();
+          statusBanner.textContent = error.message || 'Camera access failed. Check camera permission and try again.';
+          statusBanner.className = 'status-banner error';
+        }
+      });
+      document.getElementById('stopScanButton').addEventListener('click', stopScanner);
 
       document.getElementById('studentForm').addEventListener('submit', function (event) {
         event.preventDefault();

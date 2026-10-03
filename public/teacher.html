@@ -27,9 +27,17 @@
             <h2>Room</h2>
             <span id="roomCodeBadge" class="badge">Room: —</span>
           </div>
+          <div class="room-invite">
+            <img id="roomQr" alt="Scan to join this classroom" width="176" height="176" />
+            <p class="small">Scan to join, or share the room code.</p>
+          </div>
           <div class="inline-actions" style="margin-top: -8px; margin-bottom: 14px;">
             <button id="copyCodeBtn" type="button">Copy room code</button>
             <button id="copyInviteBtn" type="button">Copy student link</button>
+          </div>
+          <div class="alert-setup">
+            <button id="enableAlertsBtn" type="button">Enable phone alerts</button>
+            <p class="small">Get a vibration and notification for new questions or when students need support, even with the dashboard in the background.</p>
           </div>
           <div class="small">Students: <span id="studentCount">0</span></div>
           <div class="small">Current topic: <span id="currentTopic">General</span></div>
@@ -96,6 +104,9 @@ Topic 3"></textarea>
       const eventsList = document.getElementById('eventsList');
       const connectionBadge = document.getElementById('connectionBadge');
       let joined = false;
+      let initialRoomLoaded = false;
+      const knownQuestionIds = new Set();
+      const knownEventIds = new Set();
 
       function setTeacherControls(enabled) {
         joined = enabled;
@@ -120,7 +131,41 @@ Topic 3"></textarea>
           connectionBadge.classList.remove('disconnected');
           setTeacherControls(true);
           reportLink.href = '/report.html?room=' + encodeURIComponent(roomCode) + '#token=' + encodeURIComponent(token);
+          document.getElementById('roomQr').src = '/api/rooms/' + encodeURIComponent(roomCode) + '/qr.svg';
           renderRoom(response.room);
+        });
+      }
+
+      function announceTeacher(title, body, tag) {
+        if (navigator.vibrate) navigator.vibrate([220, 100, 220]);
+        if ('Notification' in window && Notification.permission === 'granted') {
+          new Notification(title, { body, tag });
+        } else if (document.visibilityState === 'visible') {
+          showStatus(title + ': ' + body);
+        }
+      }
+
+      function renderNewAlerts(room) {
+        const questions = room.questions || [];
+        const events = room.events || [];
+        if (!initialRoomLoaded) {
+          questions.forEach((question) => knownQuestionIds.add(question.id));
+          events.forEach((event) => knownEventIds.add(event.type + ':' + event.time));
+          initialRoomLoaded = true;
+          return;
+        }
+        questions.forEach((question) => {
+          if (knownQuestionIds.has(question.id)) return;
+          knownQuestionIds.add(question.id);
+          announceTeacher('New student question', question.text, 'question-' + question.id);
+        });
+        events.forEach((event) => {
+          const eventId = event.type + ':' + event.time;
+          if (knownEventIds.has(eventId)) return;
+          knownEventIds.add(eventId);
+          if (event.type === 'spike') {
+            announceTeacher('Class needs support', event.lostPct + '% feel lost in ' + (event.topic || 'this topic') + '.', 'spike-' + room.code);
+          }
         });
       }
 
@@ -216,6 +261,7 @@ Topic 3"></textarea>
 
       function renderRoom(room) {
         if (!room) return;
+        renderNewAlerts(room);
         roomCodeBadge.textContent = 'Room: ' + room.code;
         studentCount.textContent = room.studentCount;
         currentTopic.textContent = room.currentTopic || 'General';
@@ -259,6 +305,53 @@ Topic 3"></textarea>
       });
       document.getElementById('copyInviteBtn').addEventListener('click', function () {
         copyText(new URL('/student.html?room=' + encodeURIComponent(roomCode), window.location.origin).href, 'Student link');
+      });
+
+      function decodeVapidKey(value) {
+        const padding = '='.repeat((4 - value.length % 4) % 4);
+        const base64 = (value + padding).replace(/-/g, '+').replace(/_/g, '/');
+        return Uint8Array.from(atob(base64), (character) => character.charCodeAt(0));
+      }
+
+      document.getElementById('enableAlertsBtn').addEventListener('click', async function () {
+        if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
+          showStatus('Phone push alerts are not supported in this browser.', 'error');
+          return;
+        }
+        if (!window.isSecureContext) {
+          showStatus('Phone alerts require HTTPS. Open the secure classroom link and try again.', 'error');
+          return;
+        }
+        try {
+          const permission = await Notification.requestPermission();
+          if (permission !== 'granted') {
+            showStatus('Allow notifications in your browser settings to receive phone alerts.', 'error');
+            return;
+          }
+          const keyResponse = await fetch('/api/push/key');
+          const keyData = await keyResponse.json();
+          if (!keyResponse.ok) throw new Error(keyData.error || 'Phone alerts are not configured.');
+          const registration = await navigator.serviceWorker.register('/service-worker.js');
+          let subscription = await registration.pushManager.getSubscription();
+          if (!subscription) {
+            subscription = await registration.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: decodeVapidKey(keyData.publicKey)
+            });
+          }
+          const response = await fetch('/api/push/subscribe', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: roomCode, token, subscription: subscription.toJSON() })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(result.error || 'Could not enable phone alerts.');
+          this.textContent = 'Phone alerts enabled';
+          this.disabled = true;
+          showStatus('Phone alerts are on for this room.', 'success');
+        } catch (error) {
+          showStatus(error.message || 'Could not enable phone alerts.', 'error');
+        }
       });
 
       document.getElementById('setTopicsBtn').addEventListener('click', function () {

@@ -3,19 +3,42 @@ const crypto = require('crypto');
 const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
+const QRCode = require('qrcode');
+const webpush = require('web-push');
 
 const app = express();
 const server = http.createServer(app);
 const io = new Server(server, { maxHttpBufferSize: 100 * 1024 });
 
 app.disable('x-powered-by');
+app.set('trust proxy', 1);
 app.use((req, res, next) => {
   res.set('X-Content-Type-Options', 'nosniff');
   res.set('Referrer-Policy', 'strict-origin-when-cross-origin');
   res.set('X-Frame-Options', 'DENY');
   next();
 });
+app.use(express.json({ limit: '10kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+app.get('/vendor/qr-scanner/qr-scanner.min.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'node_modules', 'qr-scanner', 'qr-scanner.min.js'));
+});
+app.get('/vendor/qr-scanner/qr-scanner-worker.min.js', (req, res) => {
+  res.sendFile(path.join(__dirname, 'node_modules', 'qr-scanner', 'qr-scanner-worker.min.js'));
+});
+
+const vapidPublicKey = process.env.VAPID_PUBLIC_KEY || '';
+const vapidPrivateKey = process.env.VAPID_PRIVATE_KEY || '';
+if (Boolean(vapidPublicKey) !== Boolean(vapidPrivateKey)) {
+  throw new Error('VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must both be configured.');
+}
+if (vapidPublicKey) {
+  webpush.setVapidDetails(
+    process.env.VAPID_SUBJECT || 'mailto:admin@example.com',
+    vapidPublicKey,
+    vapidPrivateKey
+  );
+}
 
 /* ===================== config ===================== */
 const CODE_LEN = 4;
@@ -57,6 +80,7 @@ function createRoom() {
     questions: [],              // {id, text, authorId, upvotes:Set, createdAt, answered, hidden}
     history: [],                // {time, topic, counts:{lost,ok,faster}, total, lostPct, marker?, reexplain?}
     events: [],                 // {type:'spike'|'reexplain', topic, time, ...}
+    pushSubscriptions: new Map(),
     reexplain: null,            // {before, startedAt, deadline, answers:Map<sid, answer>}
     topics: ['General'],
     currentTopic: 'General',
@@ -100,13 +124,34 @@ function recordSample(room) {
     && previous.lostPct > 30;
   if (totalVotes >= 3 && lostPct > 30 && !previousReachedThreshold) {
       addEvent(room, { type: 'spike', time: now(), topic: room.currentTopic, lostPct, before: lostPct });
+      notifyTeacher(room, 'Class needs support', `${lostPct}% of responses feel lost in ${room.currentTopic}.`, `spike-${room.code}`);
       if (!room.reexplain) {
         room.reexplain = { before: lostPct, startedAt: now(), deadline: now() + REEVAL_WINDOW_MS, answers: new Map() };
       }
+      broadcastRoomUpdate(room);
   }
 }
 
 function teacherRoomName(roomCode) { return `teacher:${roomCode}`; }
+
+function notifyTeacher(room, title, body, tag) {
+  if (!vapidPublicKey || !room.pushSubscriptions.size) return;
+  const payload = JSON.stringify({
+    title,
+    body,
+    tag,
+    url: `/teacher.html?room=${room.code}#token=${room.teacherToken}`
+  });
+  for (const [endpoint, subscription] of room.pushSubscriptions) {
+    webpush.sendNotification(subscription, payload).catch((error) => {
+      if (error.statusCode === 404 || error.statusCode === 410) {
+        room.pushSubscriptions.delete(endpoint);
+        return;
+      }
+      console.error(`Could not send teacher push notification for room ${room.code}.`, error);
+    });
+  }
+}
 
 function broadcastRoomUpdate(room) {
   io.to(teacherRoomName(room.code)).emit('room-update', snapshotForTeacher(room));
@@ -273,6 +318,7 @@ io.on('connection', (socket) => {
     studentQuestionTime.set(questionKey, now());
     const q = { id: crypto.randomUUID(), text, authorId: studentId, upvotes: new Set(), createdAt: now(), answered: false, hidden: false };
     room.questions.push(q);
+    notifyTeacher(room, 'New student question', text, `question-${q.id}`);
     broadcastRoomUpdate(room);
     io.to(room.code).emit('student-questions', studentQuestionList(room));
     cb?.({ ok: true, question: q });
@@ -383,6 +429,65 @@ app.get('/create', (req, res) => {
   const room = createRoom();
   rooms.set(room.code, room);
   res.redirect(`/teacher.html?room=${room.code}#token=${room.teacherToken}`);
+});
+app.get('/api/push/key', (req, res) => {
+  if (!vapidPublicKey) {
+    return res.status(503).json({ error: 'Phone alerts are not configured on this server yet.' });
+  }
+  res.json({ publicKey: vapidPublicKey });
+});
+app.post('/api/push/subscribe', (req, res) => {
+  const code = sanitize(req.body?.code, 10).toUpperCase();
+  const token = sanitize(req.body?.token, 80);
+  const subscription = req.body?.subscription;
+  const room = rooms.get(code);
+  if (!room) return res.status(404).json({ error: 'Room not found.' });
+  if (room.teacherToken !== token) return res.status(403).json({ error: 'Not the teacher.' });
+  if (!vapidPublicKey) return res.status(503).json({ error: 'Phone alerts are not configured on this server yet.' });
+  if (
+    !subscription || typeof subscription.endpoint !== 'string' ||
+    subscription.endpoint.length > 2048 ||
+    typeof subscription.keys?.p256dh !== 'string' ||
+    typeof subscription.keys?.auth !== 'string'
+  ) {
+    return res.status(400).json({ error: 'Invalid push subscription.' });
+  }
+  let endpoint;
+  try {
+    endpoint = new URL(subscription.endpoint);
+  } catch {
+    return res.status(400).json({ error: 'Invalid push subscription endpoint.' });
+  }
+  const trustedPushHosts = ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com'];
+  if (
+    endpoint.protocol !== 'https:' ||
+    !trustedPushHosts.some((host) => endpoint.hostname === host || endpoint.hostname.endsWith('.' + host))
+  ) {
+    return res.status(400).json({ error: 'Push subscriptions must use a supported browser push service.' });
+  }
+  if (!room.pushSubscriptions.has(subscription.endpoint) && room.pushSubscriptions.size >= 5) {
+    return res.status(429).json({ error: 'This room already has the maximum number of alert devices.' });
+  }
+  room.pushSubscriptions.set(subscription.endpoint, subscription);
+  res.status(201).json({ ok: true });
+});
+app.get('/api/rooms/:code/qr.svg', async (req, res) => {
+  const code = sanitize(req.params.code, 10).toUpperCase();
+  if (!rooms.has(code)) return res.status(404).send('Room not found.');
+  try {
+    const studentUrl = new URL(`/student.html?room=${encodeURIComponent(code)}`, `${req.protocol}://${req.get('host')}`);
+    const svg = await QRCode.toString(studentUrl.href, {
+      type: 'svg',
+      errorCorrectionLevel: 'M',
+      margin: 2,
+      width: 240,
+      color: { dark: '#111827', light: '#ffffff' }
+    });
+    res.type('image/svg+xml').set('Cache-Control', 'no-store').send(svg);
+  } catch (error) {
+    console.error(`Could not create a join QR code for room ${code}.`, error);
+    res.status(500).send('Could not create the room QR code.');
+  }
 });
 app.get('/healthz', (req, res) => res.status(200).json({ status: 'ok' }));
 app.get('/home.html', (req, res) => res.sendFile(path.join(__dirname, 'public', 'home.html')));
