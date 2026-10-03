@@ -301,9 +301,10 @@ async function gradeShortAnswers(questions, answers) {
 }
 
 /* ===================== File upload ===================== */
+const MAX_UPLOAD_SIZE_BYTES = 100 * 1024 * 1024;
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  limits: { fileSize: MAX_UPLOAD_SIZE_BYTES },
   fileFilter: (req, file, cb) => {
     const allowed = [
       'application/pdf',
@@ -322,6 +323,18 @@ const upload = multer({
     }
   }
 });
+
+function handleQuizUpload(req, res, next) {
+  upload.single('file')(req, res, (error) => {
+    if (!error) return next();
+    if (error instanceof multer.MulterError && error.code === 'LIMIT_FILE_SIZE') {
+      return res.status(413).json({ error: 'Quiz files must be 100 MB or smaller.' });
+    }
+    return res.status(400).json({
+      error: error.message || 'Could not process the uploaded file.'
+    });
+  });
+}
 
 async function extractText(file) {
   const ext = path.extname(file.originalname).toLowerCase();
@@ -941,7 +954,7 @@ app.get('/create', (req, res) => {
 });
 
 /* AI Quiz generation endpoint */
-app.post('/api/quiz/generate', upload.single('file'), async (req, res) => {
+app.post('/api/quiz/generate', handleQuizUpload, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
     const code = sanitize(req.body?.code, 10).toUpperCase();

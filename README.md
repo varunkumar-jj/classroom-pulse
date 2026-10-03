@@ -68,7 +68,8 @@ requires adding the site to the Home Screen.
 
 ## AI quizzes and video rooms
 
-The teacher AI Quiz tab accepts PDF, Word, Markdown, and text lesson material.
+The teacher AI Quiz tab accepts PDF, Word, Markdown, and text lesson material up
+to 100 MB.
 It generates a validated mix of multiple-choice, true/false, and rubric-based
 short-answer questions. Teachers can choose question count, difficulty, and
 types, then review reference answers and rubrics before launching. Objective
@@ -93,7 +94,9 @@ sent to browsers. Without all three values, the video room reports that
 service configuration is unavailable. Teachers join with camera and microphone
 enabled by default; students join muted with cameras off and can opt in.
 Camera, microphone, and screen sharing require a secure HTTPS context and user
-permission.
+permission. Screen capture also requires a browser that exposes the display
+capture API; use a current desktop browser if the screen-share control reports
+that capture is unsupported. Mobile browser support varies.
 
 For a Render Blueprint, set the OpenAI and LiveKit values when prompted or add
 them under the service's **Environment** settings, then redeploy. Keep the

@@ -192,6 +192,10 @@ async function startVideoRoom() {
     });
     room.on(liveKitClient.RoomEvent.LocalTrackUnpublished, (publication, participant) => {
       if (publication.track) detachTrack(publication.track, participant);
+      if (publication.source === liveKitClient.Track.Source.ScreenShare) {
+        screenSharing = false;
+        updateVideoControls();
+      }
     });
     room.on(liveKitClient.RoomEvent.ConnectionStateChanged, (state) => {
       if (state === 'reconnecting') {
@@ -308,10 +312,16 @@ function withLiveRoom(action) {
 
 async function toggleScreenShare(nextState) {
   if (!liveKitRoom) return;
-  if (!navigator.mediaDevices?.getDisplayMedia || !window.isSecureContext) {
+  if (nextState && !window.isSecureContext) {
     screenSharing = false;
     updateVideoControls();
-    report('Screen sharing requires HTTPS and a browser that supports display capture.', 'error');
+    report('Screen sharing requires this site to be opened over HTTPS.', 'error');
+    return;
+  }
+  if (nextState && typeof navigator.mediaDevices?.getDisplayMedia !== 'function') {
+    screenSharing = false;
+    updateVideoControls();
+    report('This browser or device does not support screen sharing. Use a desktop browser with display-capture support.', 'error');
     return;
   }
 
@@ -320,9 +330,15 @@ async function toggleScreenShare(nextState) {
     screenSharing = nextState;
     updateVideoControls();
   } catch (error) {
-    screenSharing = false;
+    if (nextState) screenSharing = false;
     updateVideoControls();
-    report(error.message || 'Could not toggle screen sharing.', 'error');
+    if (error?.name === 'NotAllowedError') {
+      report('Screen sharing was cancelled or blocked. Allow screen capture in the browser prompt and try again.', 'error');
+    } else if (error?.name === 'NotSupportedError' || /not supported|not implemented/i.test(error?.message || '')) {
+      report('Screen sharing is unavailable in this browser or device. Use a supported desktop browser.', 'error');
+    } else {
+      report(error.message || 'Could not toggle screen sharing.', 'error');
+    }
   }
 }
 
