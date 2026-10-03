@@ -5,6 +5,8 @@ const http = require('http');
 const { Server } = require('socket.io');
 const QRCode = require('qrcode');
 const webpush = require('web-push');
+const multer = require('multer');
+const fs = require('fs');
 
 const app = express();
 const server = http.createServer(app);
@@ -40,6 +42,88 @@ if (vapidPublicKey) {
   );
 }
 
+/* ===================== OpenAI ===================== */
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
+
+async function generateQuizFromText(text, count = 5) {
+  if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not configured on this server.');
+  const { OpenAI } = require('openai');
+  const openai = new OpenAI({ apiKey: OPENAI_API_KEY });
+
+  const systemPrompt = `You are an expert educator. Generate exactly ${count} multiple-choice quiz questions from the provided content.
+Return a JSON array (no markdown, no explanation) like:
+[
+  {
+    "question": "...",
+    "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
+    "answer": "A",
+    "explanation": "..."
+  }
+]
+Rules:
+- Each question must have exactly 4 options labelled A, B, C, D.
+- The "answer" field must be just the letter (A, B, C, or D).
+- Questions must be directly based on the provided text.
+- Vary difficulty from easy to hard.`;
+
+  const truncatedText = text.slice(0, 12000); // stay within token limits
+  const response = await openai.chat.completions.create({
+    model: 'gpt-4o',
+    messages: [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: `Generate quiz questions from this content:\n\n${truncatedText}` }
+    ],
+    temperature: 0.7,
+    max_tokens: 3000
+  });
+
+  const raw = response.choices[0].message.content.trim();
+  // Strip markdown code blocks if present
+  const jsonStr = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+  const questions = JSON.parse(jsonStr);
+  if (!Array.isArray(questions)) throw new Error('Invalid quiz response format');
+  return questions.slice(0, count);
+}
+
+/* ===================== File upload ===================== */
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 20 * 1024 * 1024 }, // 20MB
+  fileFilter: (req, file, cb) => {
+    const allowed = [
+      'application/pdf',
+      'text/plain',
+      'application/msword',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      'text/markdown'
+    ];
+    // also allow by extension
+    const ext = path.extname(file.originalname).toLowerCase();
+    const allowedExt = ['.pdf', '.txt', '.doc', '.docx', '.md'];
+    if (allowed.includes(file.mimetype) || allowedExt.includes(ext)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Unsupported file type. Upload PDF, Word, or text files.'));
+    }
+  }
+});
+
+async function extractText(file) {
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (ext === '.pdf') {
+    const pdfParse = require('pdf-parse');
+    const data = await pdfParse(file.buffer);
+    return data.text;
+  } else if (ext === '.docx' || ext === '.doc') {
+    const mammoth = require('mammoth');
+    const result = await mammoth.extractRawText({ buffer: file.buffer });
+    return result.value;
+  } else {
+    // txt, md, or unknown – treat as UTF-8 text
+    return file.buffer.toString('utf-8');
+  }
+}
+
 /* ===================== config ===================== */
 const CODE_LEN = 4;
 const CHARSET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -54,6 +138,7 @@ const MAX_STUDENTS_PER_ROOM = 500;
 const MAX_QUESTIONS_PER_ROOM = 200;
 const MAX_HISTORY_PER_ROOM = 2000;
 const MAX_EVENTS_PER_ROOM = 200;
+const MAX_QUIZ_QUESTIONS = 20;
 
 /* ===================== helpers ===================== */
 function genCode() {
@@ -84,7 +169,11 @@ function createRoom() {
     reexplain: null,            // {before, startedAt, deadline, answers:Map<sid, answer>}
     topics: ['General'],
     currentTopic: 'General',
-    createdAt: now()
+    createdAt: now(),
+    // AI Quiz
+    quiz: null,                 // {questions:[...], active:bool, responses:Map<studentId,answers[]>}
+    // WebRTC peers
+    peers: new Map(),           // socketId -> {name, role}
   };
 }
 
@@ -191,9 +280,57 @@ function cleanupStudents(room) {
   }
 }
 
+/* ===================== quiz helpers ===================== */
+function quizSnapshotForStudent(room) {
+  if (!room.quiz || !room.quiz.active) return null;
+  return {
+    active: true,
+    questions: room.quiz.questions.map(q => ({
+      question: q.question,
+      options: q.options
+      // no answer field for students
+    }))
+  };
+}
+
+function quizSnapshotForTeacher(room) {
+  if (!room.quiz) return null;
+  const responses = room.quiz.responses;
+  const total = responses.size;
+  return {
+    active: room.quiz.active,
+    questions: room.quiz.questions,
+    responseCount: total,
+    studentCount: room.students.size,
+    results: room.quiz.active ? null : computeQuizResults(room)
+  };
+}
+
+function computeQuizResults(room) {
+  if (!room.quiz) return null;
+  const questions = room.quiz.questions;
+  const responses = room.quiz.responses;
+  return questions.map((q, qi) => {
+    const correctAnswer = q.answer; // e.g. "A"
+    let correct = 0, total = 0;
+    for (const [, studentAnswers] of responses) {
+      if (studentAnswers[qi] !== undefined) {
+        total++;
+        if (studentAnswers[qi] === correctAnswer) correct++;
+      }
+    }
+    return { question: q.question, correct, total, pct: total ? Math.round((correct / total) * 100) : 0 };
+  });
+}
+
 /* ===================== snapshots ===================== */
 function snapshotForStudent(room) {
-  return { code: room.code, currentTopic: room.currentTopic, reexplain: Boolean(room.reexplain) };
+  return {
+    code: room.code,
+    currentTopic: room.currentTopic,
+    reexplain: Boolean(room.reexplain),
+    quiz: quizSnapshotForStudent(room)
+  };
 }
 
 function snapshotForTeacher(room) {
@@ -220,7 +357,8 @@ function snapshotForTeacher(room) {
       time: h.time, topic: h.topic, counts: h.counts, total: h.total,
       lostPct: h.lostPct, marker: h.marker, reexplain: h.reexplain
     })),
-    events: room.events
+    events: room.events,
+    quiz: quizSnapshotForTeacher(room)
   };
 }
 
@@ -247,7 +385,8 @@ function reportSnapshot(room) {
       lostPct: h.marker || h.total >= 3 ? h.lostPct : null,
       total: h.total,
       marker: h.marker
-    }))
+    })),
+    quizResults: computeQuizResults(room)
   };
 }
 
@@ -260,6 +399,7 @@ io.on('connection', (socket) => {
   let room = null;
   let role = null;
   let studentId = null;
+  let peerName = '';
 
   socket.on('student-join', (payload, cb) => {
     const code = sanitize(payload?.code, 10).toUpperCase();
@@ -269,16 +409,16 @@ io.on('connection', (socket) => {
     room = nextRoom;
     studentId = sanitize(payload?.id, 64) || ('s_' + Math.random().toString(36).slice(2, 10));
     if (!room.students.has(studentId) && room.students.size >= MAX_STUDENTS_PER_ROOM) {
-      room = null;
-      role = null;
-      studentId = null;
+      room = null; role = null; studentId = null;
       return cb?.({ ok: false, err: 'Room is full' });
     }
     if (!room.students.has(studentId)) room.students.set(studentId, { name: payload?.name ? sanitize(payload.name, 30) : '', joinedAt: now(), lastSeen: now() });
     else if (payload?.name) room.students.get(studentId).name = sanitize(payload.name, 30);
     room.students.get(studentId).lastSeen = now();
     role = 'student';
+    peerName = room.students.get(studentId).name || 'Student';
     socket.join(code);
+    room.peers.set(socket.id, { name: peerName, role: 'student' });
     socket.emit('your-vote', room.votes.get(studentId) || null);
     socket.emit('student-questions', studentQuestionList(room));
     broadcastRoomUpdate(room);
@@ -294,7 +434,9 @@ io.on('connection', (socket) => {
     if (room) socket.leave(role === 'teacher' ? teacherRoomName(room.code) : room.code);
     room = nextRoom;
     role = 'teacher';
+    peerName = 'Teacher';
     socket.join(teacherRoomName(code));
+    room.peers.set(socket.id, { name: 'Teacher', role: 'teacher' });
     cb?.({ ok: true, room: snapshotForTeacher(room) });
   });
 
@@ -392,6 +534,102 @@ io.on('connection', (socket) => {
     cb?.({ ok: true });
   });
 
+  /* ====== QUIZ SOCKET EVENTS ====== */
+  socket.on('quiz-set', (payload, cb) => {
+    if (!room || role !== 'teacher') return cb?.({ ok: false, err: 'Not teacher' });
+    const questions = payload?.questions;
+    if (!Array.isArray(questions) || questions.length === 0) return cb?.({ ok: false, err: 'No questions provided' });
+    if (questions.length > MAX_QUIZ_QUESTIONS) return cb?.({ ok: false, err: 'Too many questions' });
+    room.quiz = { questions: questions.slice(0, MAX_QUIZ_QUESTIONS), active: false, responses: new Map() };
+    broadcastRoomUpdate(room);
+    cb?.({ ok: true });
+  });
+
+  socket.on('quiz-launch', (_, cb) => {
+    if (!room || role !== 'teacher') return cb?.({ ok: false, err: 'Not teacher' });
+    if (!room.quiz) return cb?.({ ok: false, err: 'No quiz set' });
+    room.quiz.active = true;
+    room.quiz.responses = new Map();
+    broadcastRoomUpdate(room);
+    // Also send live quiz to all students
+    io.to(room.code).emit('quiz-start', quizSnapshotForStudent(room));
+    cb?.({ ok: true });
+  });
+
+  socket.on('quiz-end', (_, cb) => {
+    if (!room || role !== 'teacher') return cb?.({ ok: false, err: 'Not teacher' });
+    if (!room.quiz) return cb?.({ ok: false, err: 'No quiz' });
+    room.quiz.active = false;
+    io.to(room.code).emit('quiz-ended', { results: computeQuizResults(room) });
+    broadcastRoomUpdate(room);
+    cb?.({ ok: true, results: computeQuizResults(room) });
+  });
+
+  socket.on('quiz-submit', (payload, cb) => {
+    if (!room || role !== 'student') return cb?.({ ok: false, err: 'Not student' });
+    if (!room.quiz || !room.quiz.active) return cb?.({ ok: false, err: 'No active quiz' });
+    const answers = payload?.answers; // array of answer letters matching question index
+    if (!Array.isArray(answers)) return cb?.({ ok: false, err: 'Bad answers' });
+    room.quiz.responses.set(studentId, answers);
+    // Notify teacher
+    io.to(teacherRoomName(room.code)).emit('quiz-response', { count: room.quiz.responses.size, total: room.students.size });
+    // Return scored answers to student
+    const scored = room.quiz.questions.map((q, i) => ({
+      correct: answers[i] === q.answer,
+      correctAnswer: q.answer,
+      explanation: q.explanation || ''
+    }));
+    cb?.({ ok: true, scored });
+  });
+
+  /* ====== WebRTC SIGNALING ====== */
+  socket.on('webrtc-join', (payload, cb) => {
+    if (!room) return cb?.({ ok: false, err: 'Not in a room' });
+    const displayName = sanitize(payload?.name || peerName, 30) || (role === 'teacher' ? 'Teacher' : 'Student');
+    room.peers.set(socket.id, { name: displayName, role });
+    // Notify existing peers in the room
+    const roomId = role === 'teacher' ? teacherRoomName(room.code) : room.code;
+    socket.to(roomId).emit('peer-joined', { peerId: socket.id, name: displayName, role });
+    // Also notify students if teacher joins and vice versa
+    if (role === 'teacher') {
+      socket.to(room.code).emit('peer-joined', { peerId: socket.id, name: displayName, role });
+    } else {
+      socket.to(teacherRoomName(room.code)).emit('peer-joined', { peerId: socket.id, name: displayName, role });
+    }
+    // Return list of current peers
+    const peers = [];
+    for (const [sid, peer] of room.peers) {
+      if (sid !== socket.id) peers.push({ peerId: sid, name: peer.name, role: peer.role });
+    }
+    cb?.({ ok: true, peers });
+  });
+
+  socket.on('webrtc-offer', (payload) => {
+    const { to, offer } = payload || {};
+    if (!to || !offer) return;
+    io.to(to).emit('webrtc-offer', { from: socket.id, offer, name: peerName });
+  });
+
+  socket.on('webrtc-answer', (payload) => {
+    const { to, answer } = payload || {};
+    if (!to || !answer) return;
+    io.to(to).emit('webrtc-answer', { from: socket.id, answer });
+  });
+
+  socket.on('webrtc-ice', (payload) => {
+    const { to, candidate } = payload || {};
+    if (!to || !candidate) return;
+    io.to(to).emit('webrtc-ice', { from: socket.id, candidate });
+  });
+
+  socket.on('webrtc-leave', () => {
+    if (!room) return;
+    room.peers.delete(socket.id);
+    // Notify all
+    io.to(room.code).emit('peer-left', { peerId: socket.id });
+    io.to(teacherRoomName(room.code)).emit('peer-left', { peerId: socket.id });
+  });
+
   socket.on('report-request', (payload, cb) => {
     const code = sanitize(payload?.code, 10).toUpperCase();
     const token = sanitize(payload?.token, 80);
@@ -402,7 +640,14 @@ io.on('connection', (socket) => {
   });
 
   socket.on('ping', () => { if (room && role === 'student') { const st = room.students.get(studentId); if (st) st.lastSeen = now(); } });
-  socket.on('disconnect', () => {});
+
+  socket.on('disconnect', () => {
+    if (room) {
+      room.peers.delete(socket.id);
+      io.to(room.code).emit('peer-left', { peerId: socket.id });
+      io.to(teacherRoomName(room.code)).emit('peer-left', { peerId: socket.id });
+    }
+  });
 });
 
 /* ===================== periodic tasks ===================== */
@@ -430,6 +675,29 @@ app.get('/create', (req, res) => {
   rooms.set(room.code, room);
   res.redirect(`/teacher.html?room=${room.code}#token=${room.teacherToken}`);
 });
+
+/* AI Quiz generation endpoint */
+app.post('/api/quiz/generate', upload.single('file'), async (req, res) => {
+  try {
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded.' });
+    const code = sanitize(req.body?.code, 10).toUpperCase();
+    const token = sanitize(req.body?.token, 80);
+    const room = rooms.get(code);
+    if (!room) return res.status(404).json({ error: 'Room not found.' });
+    if (room.teacherToken !== token) return res.status(403).json({ error: 'Not the teacher.' });
+
+    const count = Math.min(Math.max(parseInt(req.body?.count) || 5, 1), MAX_QUIZ_QUESTIONS);
+    const text = await extractText(req.file);
+    if (!text || text.trim().length < 50) return res.status(400).json({ error: 'Could not extract enough text from this file. Try a different file.' });
+
+    const questions = await generateQuizFromText(text, count);
+    res.json({ ok: true, questions });
+  } catch (error) {
+    console.error('Quiz generation error:', error);
+    res.status(500).json({ error: error.message || 'Quiz generation failed.' });
+  }
+});
+
 app.get('/api/push/key', (req, res) => {
   if (!vapidPublicKey) {
     return res.status(503).json({ error: 'Phone alerts are not configured on this server yet.' });

@@ -3,97 +3,214 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Teacher | Classroom Pulse</title>
+    <title>Teacher Dashboard | Classroom Pulse</title>
+    <meta name="description" content="Teacher dashboard for Classroom Pulse — live check-ins, AI quiz generator, and video room." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" />
     <link rel="stylesheet" href="/styles.css" />
     <script src="/socket.io/socket.io.js"></script>
   </head>
   <body>
     <div class="container">
       <header>
-        <h1>Teacher Dashboard</h1>
+        <div>
+          <div class="brand"><span class="brand-mark">✳</span><span>Classroom Pulse</span></div>
+          <h1 style="margin:8px 0 0;">Teacher Dashboard</h1>
+        </div>
         <div class="toolbar">
           <div class="badge connection-badge" id="connectionBadge">Connecting</div>
+          <button id="videoRoomBtn" class="blue" disabled>📹 Start Video Room</button>
           <button id="nextTopicBtn" class="primary" disabled>Next topic</button>
-          <button id="reexplainBtn" disabled>Start re-explain</button>
-          <a id="reportLink" class="btn" href="#">Open report</a>
+          <button id="reexplainBtn" disabled>Re-explain</button>
+          <a id="reportLink" class="btn" href="#">📊 Report</a>
         </div>
       </header>
 
       <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
 
-      <div class="grid">
-        <section class="card">
-          <div class="row">
-            <h2>Room</h2>
-            <span id="roomCodeBadge" class="badge">Room: —</span>
+      <!-- Video Room overlay (hidden by default) -->
+      <div id="videoRoom" class="video-room hidden">
+        <div class="video-header">
+          <div style="display:flex;align-items:center;gap:12px;">
+            <span class="brand-mark" style="font-size:14px;">📹</span>
+            <h2>Video Room — <span id="videoRoomCode">—</span></h2>
+            <span id="videoPeerCount" class="badge">1 participant</span>
           </div>
-          <div class="room-invite">
-            <img id="roomQr" alt="Scan to join this classroom" width="176" height="176" />
-            <p class="small">Scan to join, or share the room code.</p>
+          <button id="leaveVideoBtn" class="ctrl-btn end">📵 <span>Leave</span></button>
+        </div>
+        <div class="video-grid" id="videoGrid">
+          <div class="video-waiting">
+            <div style="font-size:2rem;">📡</div>
+            <h3>Waiting for students to join...</h3>
+            <p>Students can click "Join Video" on their screen once you launch the room.</p>
           </div>
-          <div class="inline-actions" style="margin-top: -8px; margin-bottom: 14px;">
-            <button id="copyCodeBtn" type="button">Copy room code</button>
-            <button id="copyInviteBtn" type="button">Copy student link</button>
-          </div>
-          <div class="alert-setup">
-            <button id="enableAlertsBtn" type="button">Enable phone alerts</button>
-            <p class="small">Get a vibration and notification for new questions or when students need support, even with the dashboard in the background.</p>
-          </div>
-          <div class="small">Students: <span id="studentCount">0</span></div>
-          <div class="small">Current topic: <span id="currentTopic">General</span></div>
+        </div>
+        <div class="video-controls">
+          <button id="toggleMicBtn" class="ctrl-btn">🎙️ <span>Mic On</span></button>
+          <button id="toggleCamBtn" class="ctrl-btn">📷 <span>Camera On</span></button>
+          <button id="shareScreenBtn" class="ctrl-btn">🖥️ <span>Screen</span></button>
+        </div>
+      </div>
 
-          <label>
-            Topics
-            <textarea id="topicsInput" rows="4" placeholder="General
-Topic 2
-Topic 3"></textarea>
-          </label>
-          <button id="setTopicsBtn" class="primary" disabled>Update topics</button>
-        </section>
+      <!-- Main dashboard tabs -->
+      <div class="tabs" style="margin-top:18px;">
+        <button class="tab-btn active" data-tab="classroom" id="tabClassroom">🎓 Classroom</button>
+        <button class="tab-btn" data-tab="quiz" id="tabQuiz">🤖 AI Quiz</button>
+        <button class="tab-btn" data-tab="questions" id="tabQuestions">❓ Questions</button>
+        <button class="tab-btn" data-tab="events" id="tabEvents">📋 Events</button>
+      </div>
 
-        <section class="card">
-          <h2>Live vote summary</h2>
-          <div class="bar-grid">
-            <div>
-              <div class="small">Lost</div>
-              <div id="lostCount">0</div>
+      <!-- TAB: Classroom -->
+      <div class="tab-panel active" id="panel-classroom">
+        <div class="grid">
+          <section class="card">
+            <div class="row">
+              <h2>Room</h2>
+              <span id="roomCodeBadge" class="badge">Room: —</span>
             </div>
-            <div>
-              <div class="small">OK</div>
-              <div id="okCount">0</div>
+            <div class="room-invite">
+              <img id="roomQr" alt="Scan to join this classroom" width="176" height="176" />
+              <p class="small">Scan to join, or share the room code.</p>
             </div>
-            <div>
-              <div class="small">Faster</div>
-              <div id="fasterCount">0</div>
+            <div class="inline-actions" style="margin-top: -8px; margin-bottom: 14px;">
+              <button id="copyCodeBtn" type="button">Copy code</button>
+              <button id="copyInviteBtn" type="button">Copy link</button>
             </div>
-          </div>
-          <div class="meter">
-            <span id="lostBar" class="lost" style="width:0%"></span>
-          </div>
-          <div class="small">Total votes: <span id="totalVotes">0</span></div>
-          <div class="small">Lost %: <span id="lostPct">Need 3 votes</span></div>
-          <div id="thresholdHint" class="small">A support prompt requires at least 3 responses.</div>
+            <div class="alert-setup">
+              <button id="enableAlertsBtn" type="button">🔔 Enable phone alerts</button>
+              <p class="small">Get vibration and notifications for questions or confusion spikes.</p>
+            </div>
+            <div style="margin-top:14px;">
+              <div class="small">Students connected: <strong id="studentCount">0</strong></div>
+              <div class="small" style="margin-top:4px;">Current topic: <span id="currentTopic">General</span></div>
+            </div>
+            <label style="margin-top:18px;">
+              Topics (one per line)
+              <textarea id="topicsInput" rows="4" placeholder="General&#10;Topic 2&#10;Topic 3"></textarea>
+            </label>
+            <button id="setTopicsBtn" class="primary" disabled>Update topics</button>
+          </section>
+
+          <section class="card">
+            <h2>Live vote summary</h2>
+            <div class="bar-grid">
+              <div>
+                <div class="small">Lost</div>
+                <div id="lostCount">0</div>
+              </div>
+              <div>
+                <div class="small">OK</div>
+                <div id="okCount">0</div>
+              </div>
+              <div>
+                <div class="small">Faster</div>
+                <div id="fasterCount">0</div>
+              </div>
+            </div>
+            <div class="meter">
+              <span id="lostBar" class="lost" style="width:0%"></span>
+            </div>
+            <div class="small">Total votes: <span id="totalVotes">0</span></div>
+            <div class="small">Lost %: <span id="lostPct">Need 3 votes</span></div>
+            <div id="thresholdHint" class="small">A support prompt requires at least 3 responses.</div>
+          </section>
+        </div>
+      </div>
+
+      <!-- TAB: AI Quiz -->
+      <div class="tab-panel" id="panel-quiz">
+        <div class="grid" style="grid-template-columns:1fr 1fr;">
+          <!-- Upload & Generate -->
+          <section class="card">
+            <div class="ai-section-header">
+              <span class="ai-icon">🤖</span>
+              <div>
+                <h2 style="margin:0;font-size:1.15rem;">AI Quiz Generator</h2>
+                <p class="small" style="margin:2px 0 0;">Upload class material → GPT-4o generates MCQs</p>
+              </div>
+            </div>
+
+            <div class="upload-zone" id="uploadZone">
+              <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.md" />
+              <div class="upload-icon">📄</div>
+              <div class="upload-label">Drop file or click to upload</div>
+              <div class="upload-hint">PDF, Word (.docx), or plain text · Max 20 MB</div>
+            </div>
+
+            <div id="fileChipWrapper" class="hidden" style="margin-top:12px;"></div>
+
+            <div class="quiz-count-row">
+              <label for="quizCount">Number of questions</label>
+              <input type="number" id="quizCount" min="1" max="20" value="5" />
+            </div>
+
+            <button id="generateQuizBtn" class="primary" style="width:100%;margin-top:14px;" disabled>
+              ✨ Generate Quiz
+            </button>
+
+            <div id="aiProgress" class="ai-progress hidden" style="margin-top:14px;">
+              <div class="ai-spinner"></div>
+              <span id="aiProgressText">Analyzing document with GPT-4o...</span>
+            </div>
+          </section>
+
+          <!-- Quiz Preview & Controls -->
+          <section class="card">
+            <div class="row" style="margin-bottom:14px;">
+              <h2 style="margin:0;">Quiz Preview</h2>
+              <div id="quizLiveBadge" class="quiz-live-badge hidden">Live</div>
+            </div>
+
+            <div id="quizEmptyState" style="color:var(--muted);font-size:0.88rem;">
+              No quiz generated yet. Upload a file and click "Generate Quiz" to get started.
+            </div>
+
+            <div id="quizPreview" class="quiz-preview hidden"></div>
+
+            <div id="quizActions" class="hidden" style="margin-top:16px;">
+              <div class="inline-actions">
+                <button id="launchQuizBtn" class="primary">🚀 Launch Quiz</button>
+                <button id="endQuizBtn" class="danger hidden">⏹ End Quiz</button>
+                <button id="clearQuizBtn">🗑 Clear</button>
+              </div>
+              <div id="quizResponseCount" class="small hidden" style="margin-top:10px;">
+                Responses: <strong id="quizResponded">0</strong> / <strong id="quizStudentCount">0</strong> students
+              </div>
+            </div>
+
+            <!-- Quiz results after ending -->
+            <div id="quizResults" class="hidden" style="margin-top:18px;">
+              <h3>📊 Quiz Results</h3>
+              <div id="quizResultsList" style="display:grid;gap:10px;"></div>
+            </div>
+          </section>
+        </div>
+      </div>
+
+      <!-- TAB: Questions -->
+      <div class="tab-panel" id="panel-questions">
+        <section class="card" style="margin-top:0;">
+          <h2>Student Questions</h2>
+          <ul id="questionsList" class="list"></ul>
         </section>
       </div>
 
-      <div class="grid" style="margin-top: 20px;">
-        <section class="card">
-          <h2>Questions</h2>
-          <ul id="questionsList" class="list"></ul>
-        </section>
-
-        <section class="card">
-          <h2>Events & history</h2>
+      <!-- TAB: Events -->
+      <div class="tab-panel" id="panel-events">
+        <section class="card" style="margin-top:0;">
+          <h2>Events &amp; History</h2>
           <ul id="eventsList" class="list"></ul>
         </section>
       </div>
     </div>
 
     <script>
+      /* ========= State ========= */
       const params = new URLSearchParams(window.location.search);
       const roomCode = (params.get('room') || '').toUpperCase();
       const token = new URLSearchParams(window.location.hash.slice(1)).get('token') || params.get('token') || '';
       const socket = io();
+
       const roomCodeBadge = document.getElementById('roomCodeBadge');
       const studentCount = document.getElementById('studentCount');
       const currentTopic = document.getElementById('currentTopic');
@@ -108,11 +225,25 @@ Topic 3"></textarea>
       const knownQuestionIds = new Set();
       const knownEventIds = new Set();
 
+      /* ========= Tabs ========= */
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+          document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+          this.classList.add('active');
+          document.getElementById('panel-' + this.dataset.tab).classList.add('active');
+        });
+      });
+
+      /* ========= Controls ========= */
       function setTeacherControls(enabled) {
         joined = enabled;
-        ['nextTopicBtn', 'reexplainBtn', 'setTopicsBtn', 'copyCodeBtn', 'copyInviteBtn'].forEach((id) => {
+        ['nextTopicBtn', 'reexplainBtn', 'setTopicsBtn', 'copyCodeBtn', 'copyInviteBtn', 'videoRoomBtn'].forEach((id) => {
           document.getElementById(id).disabled = !enabled;
         });
+        if (enabled && currentQuiz) {
+          document.getElementById('launchQuizBtn').disabled = false;
+        }
       }
 
       function connectTeacher() {
@@ -132,6 +263,7 @@ Topic 3"></textarea>
           setTeacherControls(true);
           reportLink.href = '/report.html?room=' + encodeURIComponent(roomCode) + '#token=' + encodeURIComponent(token);
           document.getElementById('roomQr').src = '/api/rooms/' + encodeURIComponent(roomCode) + '/qr.svg';
+          document.getElementById('videoRoomCode').textContent = roomCode;
           renderRoom(response.room);
         });
       }
@@ -158,6 +290,8 @@ Topic 3"></textarea>
           if (knownQuestionIds.has(question.id)) return;
           knownQuestionIds.add(question.id);
           announceTeacher('New student question', question.text, 'question-' + question.id);
+          // Add notification dot to Questions tab
+          document.getElementById('tabQuestions').classList.add('notif-dot');
         });
         events.forEach((event) => {
           const eventId = event.type + ':' + event.time;
@@ -168,6 +302,10 @@ Topic 3"></textarea>
           }
         });
       }
+
+      document.getElementById('tabQuestions').addEventListener('click', function () {
+        this.classList.remove('notif-dot');
+      });
 
       async function copyText(value, label) {
         try {
@@ -193,7 +331,6 @@ Topic 3"></textarea>
           questionsList.appendChild(item);
           return;
         }
-
         questions.forEach((question) => {
           const item = document.createElement('li');
           const author = document.createElement('strong');
@@ -206,29 +343,22 @@ Topic 3"></textarea>
           item.append(author, text, count);
           const actions = document.createElement('div');
           actions.className = 'inline-actions';
-
           const answeredBtn = document.createElement('button');
-          answeredBtn.textContent = question.answered ? 'Answered' : 'Mark answered';
+          answeredBtn.textContent = question.answered ? '✓ Answered' : 'Mark answered';
           answeredBtn.disabled = question.answered;
           answeredBtn.addEventListener('click', function () {
             socket.emit('moderate', { id: question.id, action: 'answered' }, function (response) {
-              if (!response || !response.ok) {
-                showStatus(response?.err || 'Moderation failed.', 'error');
-              }
+              if (!response || !response.ok) showStatus(response?.err || 'Moderation failed.', 'error');
             });
           });
-
           const hideBtn = document.createElement('button');
           hideBtn.textContent = question.hidden ? 'Hidden' : 'Hide';
           hideBtn.disabled = question.hidden;
           hideBtn.addEventListener('click', function () {
             socket.emit('moderate', { id: question.id, action: 'hide' }, function (response) {
-              if (!response || !response.ok) {
-                showStatus(response?.err || 'Moderation failed.', 'error');
-              }
+              if (!response || !response.ok) showStatus(response?.err || 'Moderation failed.', 'error');
             });
           });
-
           actions.appendChild(answeredBtn);
           actions.appendChild(hideBtn);
           item.appendChild(actions);
@@ -244,7 +374,6 @@ Topic 3"></textarea>
           eventsList.appendChild(item);
           return;
         }
-
         events.slice().reverse().forEach((event) => {
           const item = document.createElement('li');
           const type = document.createElement('strong');
@@ -278,8 +407,14 @@ Topic 3"></textarea>
         document.getElementById('lostBar').style.width = hasReliableSample ? room.lostPct + '%' : '0%';
         renderQuestions(room.questions);
         renderEvents(room.events || []);
+        // Update quiz state from server
+        if (room.quiz) {
+          renderQuizFromServer(room.quiz);
+        }
+        document.getElementById('quizStudentCount').textContent = room.studentCount;
       }
 
+      /* ========= Socket events ========= */
       socket.on('connect', function () {
         connectionBadge.textContent = 'Connected';
         connectionBadge.classList.remove('disconnected');
@@ -299,10 +434,16 @@ Topic 3"></textarea>
         connectionBadge.classList.remove('connected');
         setTeacherControls(false);
       });
+      socket.on('room-update', function (room) { renderRoom(room); });
 
-      document.getElementById('copyCodeBtn').addEventListener('click', function () {
-        copyText(roomCode, 'Room code');
+      socket.on('quiz-response', function ({ count, total }) {
+        document.getElementById('quizResponded').textContent = count;
+        document.getElementById('quizStudentCount').textContent = total;
+        document.getElementById('quizResponseCount').classList.remove('hidden');
       });
+
+      /* ========= Button handlers ========= */
+      document.getElementById('copyCodeBtn').addEventListener('click', function () { copyText(roomCode, 'Room code'); });
       document.getElementById('copyInviteBtn').addEventListener('click', function () {
         copyText(new URL('/student.html?room=' + encodeURIComponent(roomCode), window.location.origin).href, 'Student link');
       });
@@ -315,41 +456,30 @@ Topic 3"></textarea>
 
       document.getElementById('enableAlertsBtn').addEventListener('click', async function () {
         if (!('Notification' in window) || !('serviceWorker' in navigator) || !('PushManager' in window)) {
-          showStatus('Phone push alerts are not supported in this browser.', 'error');
-          return;
+          showStatus('Phone push alerts are not supported in this browser.', 'error'); return;
         }
         if (!window.isSecureContext) {
-          showStatus('Phone alerts require HTTPS. Open the secure classroom link and try again.', 'error');
-          return;
+          showStatus('Phone alerts require HTTPS.', 'error'); return;
         }
         try {
           const keyResponse = await fetch('/api/push/key');
           const keyData = await keyResponse.json();
           if (!keyResponse.ok) throw new Error(keyData.error || 'Phone alerts are not configured.');
-          if (typeof keyData.publicKey !== 'string' || !keyData.publicKey) {
-            throw new Error('Phone alerts are not configured correctly on this server.');
-          }
+          if (typeof keyData.publicKey !== 'string' || !keyData.publicKey) throw new Error('Phone alerts are not configured correctly on this server.');
           const permission = await Notification.requestPermission();
-          if (permission !== 'granted') {
-            showStatus('Allow notifications in your browser settings to receive phone alerts.', 'error');
-            return;
-          }
+          if (permission !== 'granted') { showStatus('Allow notifications in your browser settings.', 'error'); return; }
           const registration = await navigator.serviceWorker.register('/service-worker.js');
           let subscription = await registration.pushManager.getSubscription();
           if (!subscription) {
-            subscription = await registration.pushManager.subscribe({
-              userVisibleOnly: true,
-              applicationServerKey: decodeVapidKey(keyData.publicKey)
-            });
+            subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeVapidKey(keyData.publicKey) });
           }
           const response = await fetch('/api/push/subscribe', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ code: roomCode, token, subscription: subscription.toJSON() })
           });
           const result = await response.json();
           if (!response.ok) throw new Error(result.error || 'Could not enable phone alerts.');
-          this.textContent = 'Phone alerts enabled';
+          this.textContent = '🔔 Phone alerts enabled';
           this.disabled = true;
           showStatus('Phone alerts are on for this room.', 'success');
         } catch (error) {
@@ -360,37 +490,424 @@ Topic 3"></textarea>
       document.getElementById('setTopicsBtn').addEventListener('click', function () {
         const topics = topicsInput.value.split(/\n|,/).map((t) => t.trim()).filter(Boolean);
         socket.emit('set-topics', { topics }, function (response) {
-          if (!response || !response.ok) {
-            showStatus(response?.err || 'Topics not updated.', 'error');
-            return;
-          }
+          if (!response || !response.ok) { showStatus(response?.err || 'Topics not updated.', 'error'); return; }
           showStatus('Topics updated.', 'success');
         });
       });
 
       document.getElementById('nextTopicBtn').addEventListener('click', function () {
         socket.emit('next-topic', {}, function (response) {
-          if (!response || !response.ok) {
-            showStatus(response?.err || 'Could not advance topic.', 'error');
-            return;
-          }
+          if (!response || !response.ok) { showStatus(response?.err || 'Could not advance topic.', 'error'); return; }
           showStatus('Moved to ' + response.topic + '.', 'success');
         });
       });
 
       document.getElementById('reexplainBtn').addEventListener('click', function () {
         socket.emit('reexplain-start', {}, function (response) {
-          if (!response || !response.ok) {
-            showStatus(response?.err || 'Re-explain could not start.', 'error');
-            return;
-          }
+          if (!response || !response.ok) { showStatus(response?.err || 'Re-explain could not start.', 'error'); return; }
           showStatus('Re-explain started. Baseline: ' + response.before + '% lost.', 'success');
         });
       });
 
-      socket.on('room-update', function (room) {
-        renderRoom(room);
+      /* ========= AI QUIZ ========= */
+      let currentQuiz = null;
+      let quizActive = false;
+
+      const uploadZone = document.getElementById('uploadZone');
+      const fileInput = document.getElementById('fileInput');
+      const generateQuizBtn = document.getElementById('generateQuizBtn');
+      const aiProgress = document.getElementById('aiProgress');
+      const aiProgressText = document.getElementById('aiProgressText');
+      const quizPreview = document.getElementById('quizPreview');
+      const quizEmptyState = document.getElementById('quizEmptyState');
+      const quizActions = document.getElementById('quizActions');
+      const launchQuizBtn = document.getElementById('launchQuizBtn');
+      const endQuizBtn = document.getElementById('endQuizBtn');
+      const clearQuizBtn = document.getElementById('clearQuizBtn');
+      const quizLiveBadge = document.getElementById('quizLiveBadge');
+
+      let selectedFile = null;
+
+      uploadZone.addEventListener('click', () => fileInput.click());
+      fileInput.addEventListener('change', function () {
+        if (this.files[0]) setSelectedFile(this.files[0]);
       });
+      uploadZone.addEventListener('dragover', e => { e.preventDefault(); uploadZone.classList.add('drag-over'); });
+      uploadZone.addEventListener('dragleave', () => uploadZone.classList.remove('drag-over'));
+      uploadZone.addEventListener('drop', e => {
+        e.preventDefault();
+        uploadZone.classList.remove('drag-over');
+        if (e.dataTransfer.files[0]) setSelectedFile(e.dataTransfer.files[0]);
+      });
+
+      function setSelectedFile(file) {
+        selectedFile = file;
+        generateQuizBtn.disabled = false;
+        const wrapper = document.getElementById('fileChipWrapper');
+        wrapper.innerHTML = '';
+        wrapper.classList.remove('hidden');
+        const chip = document.createElement('div');
+        chip.className = 'file-chip';
+        chip.innerHTML = `📄 ${file.name} <button type="button" title="Remove file">✕</button>`;
+        chip.querySelector('button').addEventListener('click', () => {
+          selectedFile = null;
+          wrapper.classList.add('hidden');
+          fileInput.value = '';
+          generateQuizBtn.disabled = true;
+        });
+        wrapper.appendChild(chip);
+      }
+
+      generateQuizBtn.addEventListener('click', async function () {
+        if (!selectedFile || !joined) return;
+        const count = parseInt(document.getElementById('quizCount').value) || 5;
+        this.disabled = true;
+        aiProgress.classList.remove('hidden');
+        aiProgressText.textContent = 'Analyzing document with GPT-4o...';
+        try {
+          const formData = new FormData();
+          formData.append('file', selectedFile);
+          formData.append('code', roomCode);
+          formData.append('token', token);
+          formData.append('count', count);
+          const response = await fetch('/api/quiz/generate', { method: 'POST', body: formData });
+          const data = await response.json();
+          if (!response.ok) throw new Error(data.error || 'Quiz generation failed.');
+          currentQuiz = data.questions;
+          renderQuizPreview(currentQuiz);
+          // Set quiz on server
+          socket.emit('quiz-set', { questions: currentQuiz }, function (r) {
+            if (!r?.ok) showStatus(r?.err || 'Could not save quiz.', 'error');
+          });
+          showStatus(`✨ Generated ${currentQuiz.length} questions successfully!`, 'success');
+        } catch (error) {
+          showStatus(error.message || 'Quiz generation failed.', 'error');
+        } finally {
+          aiProgress.classList.add('hidden');
+          this.disabled = false;
+        }
+      });
+
+      function renderQuizPreview(questions) {
+        quizEmptyState.classList.add('hidden');
+        quizPreview.innerHTML = '';
+        quizPreview.classList.remove('hidden');
+        quizActions.classList.remove('hidden');
+        const letters = ['A', 'B', 'C', 'D'];
+        questions.forEach((q, i) => {
+          const card = document.createElement('div');
+          card.className = 'quiz-q-card';
+          card.innerHTML = `
+            <div class="q-num">Question ${i + 1}</div>
+            <div class="q-text">${escHtml(q.question)}</div>
+            <div class="quiz-options">
+              ${q.options.map((opt, oi) => `
+                <div class="quiz-opt ${letters[oi] === q.answer ? 'correct' : ''}">
+                  <span class="quiz-opt-letter">${letters[oi]}</span>
+                  <span>${escHtml(opt.replace(/^[A-D]\.\s*/, ''))}</span>
+                </div>
+              `).join('')}
+            </div>
+            ${q.explanation ? `<div class="small" style="margin-top:8px;color:var(--success);">💡 ${escHtml(q.explanation)}</div>` : ''}
+          `;
+          quizPreview.appendChild(card);
+        });
+        launchQuizBtn.disabled = !joined;
+      }
+
+      function renderQuizFromServer(serverQuiz) {
+        if (!currentQuiz && serverQuiz.questions && serverQuiz.questions.length) {
+          currentQuiz = serverQuiz.questions;
+          renderQuizPreview(currentQuiz);
+        }
+        if (serverQuiz.active && !quizActive) {
+          quizActive = true;
+          launchQuizBtn.classList.add('hidden');
+          endQuizBtn.classList.remove('hidden');
+          quizLiveBadge.classList.remove('hidden');
+          document.getElementById('quizResponseCount').classList.remove('hidden');
+        } else if (!serverQuiz.active && quizActive) {
+          quizActive = false;
+          endQuizBtn.classList.add('hidden');
+          launchQuizBtn.classList.remove('hidden');
+          quizLiveBadge.classList.add('hidden');
+          if (serverQuiz.results) renderQuizResults(serverQuiz.results);
+        }
+        if (serverQuiz.responseCount !== undefined) {
+          document.getElementById('quizResponded').textContent = serverQuiz.responseCount;
+        }
+      }
+
+      launchQuizBtn.addEventListener('click', function () {
+        if (!currentQuiz) return;
+        socket.emit('quiz-launch', {}, function (r) {
+          if (!r?.ok) { showStatus(r?.err || 'Could not launch quiz.', 'error'); return; }
+          quizActive = true;
+          launchQuizBtn.classList.add('hidden');
+          endQuizBtn.classList.remove('hidden');
+          quizLiveBadge.classList.remove('hidden');
+          document.getElementById('quizResponseCount').classList.remove('hidden');
+          document.getElementById('quizResponded').textContent = '0';
+          showStatus('🚀 Quiz launched! Students can now answer.', 'success');
+          // switch to quiz tab
+          document.querySelector('[data-tab="quiz"]').click();
+        });
+      });
+
+      endQuizBtn.addEventListener('click', function () {
+        socket.emit('quiz-end', {}, function (r) {
+          if (!r?.ok) { showStatus(r?.err || 'Could not end quiz.', 'error'); return; }
+          quizActive = false;
+          endQuizBtn.classList.add('hidden');
+          launchQuizBtn.classList.remove('hidden');
+          quizLiveBadge.classList.add('hidden');
+          if (r.results) renderQuizResults(r.results);
+          showStatus('Quiz ended. Results are in!', 'success');
+        });
+      });
+
+      clearQuizBtn.addEventListener('click', function () {
+        if (quizActive) { showStatus('End the quiz before clearing.', 'error'); return; }
+        currentQuiz = null;
+        quizPreview.innerHTML = '';
+        quizPreview.classList.add('hidden');
+        quizActions.classList.add('hidden');
+        document.getElementById('quizResults').classList.add('hidden');
+        quizEmptyState.classList.remove('hidden');
+        quizLiveBadge.classList.add('hidden');
+        document.getElementById('quizResponseCount').classList.add('hidden');
+      });
+
+      function renderQuizResults(results) {
+        const container = document.getElementById('quizResults');
+        const list = document.getElementById('quizResultsList');
+        container.classList.remove('hidden');
+        list.innerHTML = '';
+        results.forEach((r, i) => {
+          const row = document.createElement('div');
+          row.className = 'quiz-result-row';
+          row.innerHTML = `
+            <div class="small" style="min-width:90px;color:var(--text);">Q${i + 1}</div>
+            <div class="quiz-result-bar"><div class="quiz-result-bar-fill" style="width:${r.pct}%"></div></div>
+            <div class="quiz-result-pct">${r.pct}%</div>
+            <div class="small">(${r.correct}/${r.total})</div>
+          `;
+          list.appendChild(row);
+        });
+      }
+
+      function escHtml(str) {
+        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+      }
+
+      /* ========= WebRTC Video Room ========= */
+      let localStream = null;
+      let peerConnections = {}; // peerId -> RTCPeerConnection
+      let micEnabled = true;
+      let camEnabled = true;
+      let inVideoRoom = false;
+
+      const iceConfig = { iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }] };
+
+      document.getElementById('videoRoomBtn').addEventListener('click', async function () {
+        if (inVideoRoom) return;
+        try {
+          localStream = await navigator.mediaDevices.getUserMedia({ video: true, audio: true });
+          inVideoRoom = true;
+          this.textContent = '📹 Video Room Active';
+          this.disabled = true;
+          document.getElementById('videoRoom').classList.remove('hidden');
+          addLocalTile();
+          // Join WebRTC room
+          socket.emit('webrtc-join', { name: 'Teacher' }, function (res) {
+            if (!res?.ok) { showStatus(res?.err || 'Could not join video room.', 'error'); return; }
+            res.peers.forEach(peer => createOffer(peer.peerId, peer.name));
+          });
+        } catch (err) {
+          showStatus('Camera/microphone access denied. ' + err.message, 'error');
+        }
+      });
+
+      document.getElementById('leaveVideoBtn').addEventListener('click', leaveVideo);
+      function leaveVideo() {
+        socket.emit('webrtc-leave');
+        Object.values(peerConnections).forEach(pc => pc.close());
+        peerConnections = {};
+        if (localStream) { localStream.getTracks().forEach(t => t.stop()); localStream = null; }
+        document.getElementById('videoRoom').classList.add('hidden');
+        document.getElementById('videoRoomBtn').textContent = '📹 Start Video Room';
+        document.getElementById('videoRoomBtn').disabled = false;
+        document.getElementById('videoGrid').innerHTML = `
+          <div class="video-waiting">
+            <div style="font-size:2rem;">📡</div>
+            <h3>Waiting for students to join...</h3>
+            <p>Students can click "Join Video" on their screen once you launch the room.</p>
+          </div>`;
+        inVideoRoom = false;
+        micEnabled = true; camEnabled = true;
+        updateCtrlBtnState();
+      }
+
+      function addLocalTile() {
+        const grid = document.getElementById('videoGrid');
+        grid.innerHTML = '';
+        const tile = document.createElement('div');
+        tile.className = 'video-tile local';
+        tile.id = 'tile-local';
+        const video = document.createElement('video');
+        video.autoplay = true;
+        video.muted = true;
+        video.playsInline = true;
+        video.srcObject = localStream;
+        const name = document.createElement('div');
+        name.className = 'video-name';
+        name.textContent = '👨‍🏫 You (Teacher)';
+        tile.append(video, name);
+        grid.appendChild(tile);
+        updatePeerCount();
+      }
+
+      function addRemoteTile(peerId, peerName) {
+        const grid = document.getElementById('videoGrid');
+        let tile = document.getElementById('tile-' + peerId);
+        if (!tile) {
+          tile = document.createElement('div');
+          tile.className = 'video-tile';
+          tile.id = 'tile-' + peerId;
+          const avatar = document.createElement('div');
+          avatar.className = 'video-avatar';
+          avatar.textContent = '👤';
+          tile.appendChild(avatar);
+          const nameEl = document.createElement('div');
+          nameEl.className = 'video-name';
+          nameEl.textContent = peerName || 'Student';
+          tile.appendChild(nameEl);
+          grid.appendChild(tile);
+          updatePeerCount();
+        }
+        return tile;
+      }
+
+      function removeRemoteTile(peerId) {
+        const tile = document.getElementById('tile-' + peerId);
+        if (tile) tile.remove();
+        updatePeerCount();
+      }
+
+      function updatePeerCount() {
+        const count = document.getElementById('videoGrid').querySelectorAll('.video-tile').length;
+        document.getElementById('videoPeerCount').textContent = count + ' participant' + (count !== 1 ? 's' : '');
+      }
+
+      function createPeerConnection(peerId, peerName) {
+        if (peerConnections[peerId]) return peerConnections[peerId];
+        const pc = new RTCPeerConnection(iceConfig);
+        peerConnections[peerId] = pc;
+        if (localStream) localStream.getTracks().forEach(t => pc.addTrack(t, localStream));
+        pc.onicecandidate = e => {
+          if (e.candidate) socket.emit('webrtc-ice', { to: peerId, candidate: e.candidate });
+        };
+        pc.ontrack = e => {
+          const tile = addRemoteTile(peerId, peerName);
+          let video = tile.querySelector('video');
+          if (!video) {
+            video = document.createElement('video');
+            video.autoplay = true;
+            video.playsInline = true;
+            tile.querySelector('.video-avatar')?.remove();
+            tile.insertBefore(video, tile.querySelector('.video-name'));
+          }
+          video.srcObject = e.streams[0];
+        };
+        pc.onconnectionstatechange = () => {
+          if (pc.connectionState === 'disconnected' || pc.connectionState === 'failed' || pc.connectionState === 'closed') {
+            delete peerConnections[peerId];
+            removeRemoteTile(peerId);
+          }
+        };
+        return pc;
+      }
+
+      async function createOffer(peerId, peerName) {
+        const pc = createPeerConnection(peerId, peerName);
+        const offer = await pc.createOffer();
+        await pc.setLocalDescription(offer);
+        socket.emit('webrtc-offer', { to: peerId, offer: pc.localDescription });
+      }
+
+      socket.on('peer-joined', async ({ peerId, name }) => {
+        if (!inVideoRoom) return;
+        addRemoteTile(peerId, name);
+        await createOffer(peerId, name);
+      });
+
+      socket.on('webrtc-offer', async ({ from, offer, name }) => {
+        if (!inVideoRoom) return;
+        const pc = createPeerConnection(from, name);
+        await pc.setRemoteDescription(new RTCSessionDescription(offer));
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        socket.emit('webrtc-answer', { to: from, answer: pc.localDescription });
+      });
+
+      socket.on('webrtc-answer', async ({ from, answer }) => {
+        const pc = peerConnections[from];
+        if (pc) await pc.setRemoteDescription(new RTCSessionDescription(answer));
+      });
+
+      socket.on('webrtc-ice', async ({ from, candidate }) => {
+        const pc = peerConnections[from];
+        if (pc) try { await pc.addIceCandidate(new RTCIceCandidate(candidate)); } catch (e) {}
+      });
+
+      socket.on('peer-left', ({ peerId }) => {
+        if (peerConnections[peerId]) { peerConnections[peerId].close(); delete peerConnections[peerId]; }
+        removeRemoteTile(peerId);
+      });
+
+      /* Video controls */
+      document.getElementById('toggleMicBtn').addEventListener('click', function () {
+        micEnabled = !micEnabled;
+        if (localStream) localStream.getAudioTracks().forEach(t => t.enabled = micEnabled);
+        updateCtrlBtnState();
+      });
+      document.getElementById('toggleCamBtn').addEventListener('click', function () {
+        camEnabled = !camEnabled;
+        if (localStream) localStream.getVideoTracks().forEach(t => t.enabled = camEnabled);
+        const localVideo = document.querySelector('#tile-local video');
+        if (localVideo) localVideo.style.display = camEnabled ? '' : 'none';
+        updateCtrlBtnState();
+      });
+      document.getElementById('shareScreenBtn').addEventListener('click', async function () {
+        try {
+          const screenStream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          const screenTrack = screenStream.getVideoTracks()[0];
+          Object.values(peerConnections).forEach(pc => {
+            const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+            if (sender) sender.replaceTrack(screenTrack);
+          });
+          screenTrack.addEventListener('ended', () => {
+            if (localStream) {
+              const camTrack = localStream.getVideoTracks()[0];
+              Object.values(peerConnections).forEach(pc => {
+                const sender = pc.getSenders().find(s => s.track?.kind === 'video');
+                if (sender && camTrack) sender.replaceTrack(camTrack);
+              });
+            }
+          });
+        } catch (e) {
+          showStatus('Screen share failed: ' + e.message, 'error');
+        }
+      });
+
+      function updateCtrlBtnState() {
+        const micBtn = document.getElementById('toggleMicBtn');
+        micBtn.innerHTML = (micEnabled ? '🎙️' : '🔇') + ' <span>' + (micEnabled ? 'Mic On' : 'Mic Off') + '</span>';
+        micBtn.classList.toggle('active', !micEnabled);
+        const camBtn = document.getElementById('toggleCamBtn');
+        camBtn.innerHTML = (camEnabled ? '📷' : '📵') + ' <span>' + (camEnabled ? 'Camera On' : 'Camera Off') + '</span>';
+        camBtn.classList.toggle('active', !camEnabled);
+      }
     </script>
   </body>
 </html>

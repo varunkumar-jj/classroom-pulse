@@ -160,7 +160,8 @@ async function main() {
     }));
     const students = participants.map((participant) => participant.socket);
     const studentSnapshot = await participants[0].update;
-    assert.deepEqual(Object.keys(studentSnapshot).sort(), ['code', 'currentTopic', 'reexplain'].sort(), 'student updates should not expose teacher-only room data');
+    assert.deepEqual(Object.keys(studentSnapshot).sort(), ['code', 'currentTopic', 'quiz', 'reexplain'].sort(), 'student updates should only expose student-safe room data');
+    assert.equal(studentSnapshot.quiz, null, 'inactive quizzes should not be exposed to students');
 
     const singleVote = await emitAck(students[0], 'vote', { vote: 'lost' });
     assert.equal(singleVote.ok, true, 'a single vote should be accepted');
@@ -219,10 +220,33 @@ async function main() {
     assert.equal(report.answeredQsCount, 1, 'report should include the answered sample question');
     assert.equal(report.unansweredQuestions.length, 0, 'answered question should not remain unanswered');
 
+    const quizQuestions = [{
+      question: 'Which option is correct?',
+      options: ['A. Correct', 'B. Incorrect', 'C. Incorrect', 'D. Incorrect'],
+      answer: 'A',
+      explanation: 'The first option is correct.'
+    }];
+    const quizSet = await emitAck(teacher, 'quiz-set', { questions: quizQuestions });
+    assert.equal(quizSet.ok, true, 'teacher should be able to set a quiz');
+    const quizStart = new Promise((resolve) => students[0].once('quiz-start', resolve));
+    const quizLaunch = await emitAck(teacher, 'quiz-launch', {});
+    assert.equal(quizLaunch.ok, true, 'teacher should be able to launch the quiz');
+    const studentQuiz = await quizStart;
+    assert.equal(studentQuiz.active, true, 'students should receive the active quiz');
+    assert.equal(studentQuiz.questions[0].answer, undefined, 'student quiz payload must not reveal the answer key');
+    assert.deepEqual(studentQuiz.questions[0].options, quizQuestions[0].options, 'students should receive the question options');
+    const quizSubmission = await emitAck(students[0], 'quiz-submit', { answers: ['A'] });
+    assert.equal(quizSubmission.ok, true, 'student should be able to submit quiz answers');
+    assert.equal(quizSubmission.scored[0].correct, true, 'quiz submission should be scored correctly');
+    const quizEnd = await emitAck(teacher, 'quiz-end', {});
+    assert.equal(quizEnd.ok, true, 'teacher should be able to end the quiz');
+    assert.equal(quizEnd.results[0].correct, 1, 'teacher results should include correct submissions');
+    assert.equal(quizEnd.results[0].total, 1, 'teacher results should count submitted answers');
+
     const malformedTopics = await emitAck(teacher, 'set-topics', { topics: 'not-an-array' });
     assert.equal(malformedTopics.ok, false, 'malformed topic payload should be rejected without crashing');
 
-    console.log(`PASS: health/static routes; room QR and push authorization; teacher room; 50 students; 50 random votes (${JSON.stringify(expected)}); question/upvotes; topics; moderation; re-explain; report and invalid-input checks.`);
+    console.log(`PASS: health/static routes; room QR and push authorization; teacher room; 50 students; 50 random votes (${JSON.stringify(expected)}); question/upvotes; topics; moderation; re-explain; report; student-safe quiz launch/scoring/results; invalid-input checks.`);
   } catch (error) {
     console.error(error);
     if (serverOutput) console.error(serverOutput);
