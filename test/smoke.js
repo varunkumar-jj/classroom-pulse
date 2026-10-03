@@ -53,6 +53,31 @@ function waitForRoomUpdate(socket, predicate, timeoutMs = 5000) {
   });
 }
 
+function createTextPdf(text) {
+  const escapedText = text.replace(/[\\()]/g, '\\$&');
+  const content = `BT\n/F1 18 Tf\n50 50 Td\n(${escapedText}) Tj\nET`;
+  const objects = [
+    '1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj',
+    '2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj',
+    '3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 1000 300] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>\nendobj',
+    `4 0 obj\n<< /Length ${Buffer.byteLength(content, 'ascii')} >>\nstream\n${content}\nendstream\nendobj`,
+    '5 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj'
+  ];
+  let pdf = '%PDF-1.4\n';
+  const offsets = [0];
+  for (const object of objects) {
+    offsets.push(Buffer.byteLength(pdf, 'ascii'));
+    pdf += `${object}\n`;
+  }
+  const xrefOffset = Buffer.byteLength(pdf, 'ascii');
+  pdf += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  for (const offset of offsets.slice(1)) {
+    pdf += `${String(offset).padStart(10, '0')} 00000 n \n`;
+  }
+  pdf += `trailer\n<< /Root 1 0 R /Size ${objects.length + 1} >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(pdf, 'ascii');
+}
+
 async function waitForHealth(url, server) {
   const started = Date.now();
   while (Date.now() - started < 10000) {
@@ -161,11 +186,11 @@ async function main() {
     assert.equal(videoClaims.video.room, roomCode, 'LiveKit token must be scoped to the classroom room');
     assert.equal(videoClaims.video.roomJoin, true, 'LiveKit token must allow room joining');
 
-    const sourceFile = new Blob([
-      'A classroom source describes the core idea, supporting evidence, and why those details matter. '.repeat(4)
-    ], { type: 'text/plain' });
+    const pdfSourceText = 'A classroom source describes the core idea, supporting evidence, and why those details matter.';
+    const sourcePdf = createTextPdf(pdfSourceText);
+    const sourceFile = new Blob([sourcePdf], { type: 'application/pdf' });
     const quizForm = new FormData();
-    quizForm.append('file', sourceFile, 'lesson.txt');
+    quizForm.append('file', sourceFile, 'lesson.pdf');
     quizForm.append('code', roomCode);
     quizForm.append('token', token);
     quizForm.append('count', '3');
@@ -173,6 +198,10 @@ async function main() {
     quizForm.append('types', JSON.stringify(['mcq', 'true_false', 'short_answer']));
     const generatedQuizResponse = await fetch(`${baseUrl}/api/quiz/generate`, { method: 'POST', body: quizForm });
     assert.equal(generatedQuizResponse.status, 200, 'AI quiz generation should return a validated mixed-format quiz');
+    assert.ok(
+      aiCalls[0]?.messages?.[1]?.content.replace(/\s+/g, ' ').includes(pdfSourceText),
+      'PDF parsing should send the complete extracted source text to the AI'
+    );
     const generatedQuiz = await generatedQuizResponse.json();
     assert.deepEqual(generatedQuiz.questions.map((question) => question.type), ['mcq', 'true_false', 'short_answer']);
     assert.ok(generatedQuiz.questions[2].rubric, 'generated short-answer questions should include an AI grading rubric');

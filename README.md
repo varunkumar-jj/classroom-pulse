@@ -5,7 +5,8 @@ questions, and teacher re-explanation check-ins.
 
 ## Run locally
 
-Requires Node.js 18 or later.
+Requires Node.js 22.3 or later in the Node 22 series. This matches the
+`pdf-parse` runtime requirement used for uploaded PDF lessons.
 
 ```sh
 npm install
@@ -77,7 +78,11 @@ assistance: review results before using them for formal assessment.
 
 Configure `OPENAI_API_KEY` on the server. `OPENAI_MODEL` defaults to
 `gpt-4o-mini`; set it to another model that supports structured JSON output if
-needed. The key stays on the server and must never be put in browser code.
+needed. If your deployment uses an OpenAI-compatible endpoint, set
+`OPENAI_BASE_URL` as well so the quiz generator and short-answer grader connect
+through that provider. The key stays on the server and must never be put in
+browser code. When a provider rejects JSON-schema formatting, the app retries
+without the strict schema wrapper so OpenAI-compatible services still work.
 
 Class video uses LiveKit Cloud's SFU instead of a peer-to-peer mesh, so each
 client publishes to the media server rather than uploading media separately to
