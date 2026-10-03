@@ -4,6 +4,7 @@ const http = require('node:http');
 const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { io } = require('socket.io-client');
+const webpush = require('web-push');
 
 const root = path.resolve(__dirname, '..');
 
@@ -68,9 +69,16 @@ async function waitForHealth(url, server) {
 async function main() {
   const port = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
+  const vapidKeys = webpush.generateVAPIDKeys();
   const server = spawn(process.execPath, [path.join(root, 'server.js')], {
     cwd: root,
-    env: { ...process.env, PORT: String(port) },
+    env: {
+      ...process.env,
+      PORT: String(port),
+      VAPID_PUBLIC_KEY: vapidKeys.publicKey,
+      VAPID_PRIVATE_KEY: vapidKeys.privateKey,
+      VAPID_SUBJECT: 'mailto:smoke-test@example.com'
+    },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   let serverOutput = '';
@@ -100,6 +108,10 @@ async function main() {
     assert.ok(roomCode && token, 'teacher URL should contain room credentials');
     assert.equal(teacherUrl.searchParams.has('token'), false, 'teacher token should not be sent in the page request URL');
 
+    const pushKey = await fetch(`${baseUrl}/api/push/key`);
+    assert.equal(pushKey.status, 200, 'configured push service should return its public VAPID key');
+    assert.equal((await pushKey.json()).publicKey, vapidKeys.publicKey);
+
     const qr = await fetch(`${baseUrl}/api/rooms/${roomCode}/qr.svg`);
     assert.equal(qr.status, 200, 'active rooms should have a scannable join QR');
     assert.match(await qr.text(), /<svg/, 'join QR should be returned as SVG');
@@ -111,6 +123,19 @@ async function main() {
       body: JSON.stringify({ code: roomCode, token: 'invalid', subscription: {} })
     });
     assert.equal(unauthorizedPush.status, 403, 'push subscriptions should require the teacher token');
+    const authorizedPush = await fetch(`${baseUrl}/api/push/subscribe`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: roomCode,
+        token,
+        subscription: {
+          endpoint: 'https://fcm.googleapis.com/fcm/send/smoke-test',
+          keys: { p256dh: 'smoke-test-key', auth: 'smoke-test-auth' }
+        }
+      })
+    });
+    assert.equal(authorizedPush.status, 201, 'authorized teacher should be able to register a push subscription');
 
     const teacher = await connect(baseUrl);
     sockets.push(teacher);

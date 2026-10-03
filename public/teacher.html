@@ -323,14 +323,17 @@ Topic 3"></textarea>
           return;
         }
         try {
+          const keyResponse = await fetch('/api/push/key');
+          const keyData = await keyResponse.json();
+          if (!keyResponse.ok) throw new Error(keyData.error || 'Phone alerts are not configured.');
+          if (typeof keyData.publicKey !== 'string' || !keyData.publicKey) {
+            throw new Error('Phone alerts are not configured correctly on this server.');
+          }
           const permission = await Notification.requestPermission();
           if (permission !== 'granted') {
             showStatus('Allow notifications in your browser settings to receive phone alerts.', 'error');
             return;
           }
-          const keyResponse = await fetch('/api/push/key');
-          const keyData = await keyResponse.json();
-          if (!keyResponse.ok) throw new Error(keyData.error || 'Phone alerts are not configured.');
           const registration = await navigator.serviceWorker.register('/service-worker.js');
           let subscription = await registration.pushManager.getSubscription();
           if (!subscription) {

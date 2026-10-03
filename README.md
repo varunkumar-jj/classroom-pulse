@@ -55,7 +55,11 @@ node -e "console.log(require('web-push').generateVAPIDKeys())"
 Configure `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` (for
 example, `mailto:admin@yourdomain.com`) as environment variables on the server.
 Keep the private key secret and stable between deployments, then restart the
-service. Push subscriptions are held in the same in-memory room as the class,
+service. For a Render Blueprint deployment, provide all three values when
+prompted; for an existing service, add them under **Environment** in the Render
+dashboard and redeploy. Without these keys the server returns a configuration
+error before asking the browser for notification permission. Push subscriptions
+are held in the same in-memory room as the class,
 so a server restart or room expiry requires enabling alerts again. Notification
 and vibration behavior depends on browser and device settings; on iOS, web push
 requires adding the site to the Home Screen.
