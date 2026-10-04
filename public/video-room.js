@@ -3,6 +3,8 @@ const LIVEKIT_CLIENT_URL = '/vendor/livekit-client/livekit-client.esm.mjs';
 let liveKitRoom = null;
 let liveKitClient = null;
 let screenSharing = false;
+let screenSharePending = false;
+let screenShareTarget = false;
 let microphoneEnabled = false;
 let cameraEnabled = false;
 let leavingRoom = false;
@@ -25,6 +27,12 @@ function updateVideoControls() {
   const micButton = document.getElementById('toggleMicBtn');
   const cameraButton = document.getElementById('toggleCamBtn');
   const screenButton = document.getElementById('shareScreenBtn');
+  const leaveButton = document.getElementById('leaveVideoBtn');
+  const controlsEnabled = Boolean(liveKitRoom && liveKitRoom.state === 'connected');
+  if (micButton) micButton.disabled = !controlsEnabled;
+  if (cameraButton) cameraButton.disabled = !controlsEnabled;
+  if (screenButton) screenButton.disabled = !controlsEnabled || screenSharePending;
+  if (leaveButton) leaveButton.disabled = !controlsEnabled;
   if (micButton) {
     micButton.innerHTML = `${microphoneEnabled ? '🎙️' : '🔇'} <span>${microphoneEnabled ? 'Mic On' : 'Mic Off'}</span>`;
     micButton.classList.toggle('active', !microphoneEnabled);
@@ -34,7 +42,10 @@ function updateVideoControls() {
     cameraButton.classList.toggle('active', !cameraEnabled);
   }
   if (screenButton) {
-    screenButton.innerHTML = `${screenSharing ? '🖥️' : '🖥️'} <span>${screenSharing ? 'Stop sharing' : 'Share screen'}</span>`;
+    const label = screenSharePending
+      ? (screenShareTarget ? 'Starting…' : 'Stopping…')
+      : (screenSharing ? 'Stop sharing' : 'Share screen');
+    screenButton.innerHTML = `🖥️ <span>${label}</span>`;
     screenButton.classList.toggle('active', screenSharing);
   }
 }
@@ -155,8 +166,17 @@ async function fetchJoinToken(config) {
       teacherToken: config.role === 'teacher' ? config.getTeacherToken() : undefined
     })
   });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || 'Could not authorize video room access.');
+  let data;
+  try {
+    data = JSON.parse(await response.text());
+  } catch {
+    throw new Error(`Video authorization returned an invalid response (${response.status}).`);
+  }
+  if (!response.ok) throw new Error(data && typeof data.error === 'string' ? data.error : 'Could not authorize video room access.');
+  if (!data || typeof data !== 'object'
+    || typeof data.url !== 'string' || typeof data.token !== 'string' || !data.url || !data.token) {
+    throw new Error('Video authorization did not return a room URL and access token.');
+  }
   return data;
 }
 
@@ -194,6 +214,7 @@ async function startVideoRoom() {
       if (publication.track) detachTrack(publication.track, participant);
       if (publication.source === liveKitClient.Track.Source.ScreenShare) {
         screenSharing = false;
+        screenSharePending = false;
         updateVideoControls();
       }
     });
@@ -204,6 +225,7 @@ async function startVideoRoom() {
       } else if (state === 'connected') {
         updateConnectionStatus('Live', 'connected');
       }
+      updateVideoControls();
     });
     room.on(liveKitClient.RoomEvent.Reconnecting, () => {
       updateConnectionStatus('Reconnecting', 'disconnected');
@@ -245,17 +267,19 @@ async function startVideoRoom() {
     if (canUseMedia && microphoneEnabled) {
       try {
         await room.localParticipant.setMicrophoneEnabled(true);
-      } catch {
+      } catch (error) {
         microphoneEnabled = false;
-        mediaWarnings.push('Microphone unavailable');
+        console.warn('Could not enable the LiveKit microphone.', error);
+        mediaWarnings.push(`Microphone unavailable (${error?.name || 'device or permission error'})`);
       }
     }
     if (canUseMedia && cameraEnabled) {
       try {
         await room.localParticipant.setCameraEnabled(true);
-      } catch {
+      } catch (error) {
         cameraEnabled = false;
-        mediaWarnings.push('Camera unavailable');
+        console.warn('Could not enable the LiveKit camera.', error);
+        mediaWarnings.push(`Camera unavailable (${error?.name || 'device or permission error'})`);
       }
     }
     updateVideoControls();
@@ -286,6 +310,7 @@ function finishVideoRoom() {
     startButton.textContent = config?.role === 'teacher' ? '📹 Start Video Room' : '📹 Join Video';
   }
   screenSharing = false;
+  screenSharePending = false;
   microphoneEnabled = false;
   cameraEnabled = false;
   updateVideoControls();
@@ -303,15 +328,21 @@ async function leaveVideoRoom() {
   updateConnectionStatus('Left room', null);
 }
 
-function withLiveRoom(action) {
+function withLiveRoom(action, onSuccess) {
   if (!liveKitRoom) return;
-  action(liveKitRoom.localParticipant).catch((error) => {
+  const room = liveKitRoom;
+  Promise.resolve().then(() => action(room.localParticipant)).then(() => {
+    onSuccess();
+  }).catch((error) => {
+    updateVideoControls();
+    console.error('Could not change a LiveKit media setting.', error);
     report(error.message || 'Could not change the video setting.', 'error');
   });
 }
 
 async function toggleScreenShare(nextState) {
-  if (!liveKitRoom) return;
+  const room = liveKitRoom;
+  if (!room || room.state !== 'connected' || screenSharePending) return;
   if (nextState && !window.isSecureContext) {
     screenSharing = false;
     updateVideoControls();
@@ -325,21 +356,46 @@ async function toggleScreenShare(nextState) {
     return;
   }
 
+  screenSharePending = true;
+  screenShareTarget = nextState;
+  updateVideoControls();
   try {
-    await liveKitRoom.localParticipant.setScreenShareEnabled(nextState);
+    await room.localParticipant.setScreenShareEnabled(nextState, {
+      audio: false,
+      contentHint: 'detail'
+    });
+    if (liveKitRoom !== room) return;
     screenSharing = nextState;
-    updateVideoControls();
   } catch (error) {
-    if (nextState) screenSharing = false;
-    updateVideoControls();
-    if (error?.name === 'NotAllowedError') {
-      report('Screen sharing was cancelled or blocked. Allow screen capture in the browser prompt and try again.', 'error');
-    } else if (error?.name === 'NotSupportedError' || /not supported|not implemented/i.test(error?.message || '')) {
-      report('Screen sharing is unavailable in this browser or device. Use a supported desktop browser.', 'error');
-    } else {
-      report(error.message || 'Could not toggle screen sharing.', 'error');
+    if (liveKitRoom !== room) return;
+    console.error(`Could not ${nextState ? 'start' : 'stop'} LiveKit screen sharing.`, error);
+    report(screenShareErrorMessage(error), 'error');
+  } finally {
+    if (liveKitRoom === room) {
+      screenSharePending = false;
+      updateVideoControls();
     }
   }
+}
+
+function screenShareErrorMessage(error) {
+  const reason = error?.name;
+  if (reason === 'NotAllowedError' || reason === 'PermissionDeniedError') {
+    return 'Screen sharing was cancelled or blocked. Allow screen capture in the browser prompt and try again.';
+  }
+  if (reason === 'NotFoundError') {
+    return 'No screen, window, or browser tab is available to share.';
+  }
+  if (reason === 'NotReadableError' || reason === 'AbortError') {
+    return 'The selected screen could not be captured. Close other capture apps and try again.';
+  }
+  if (reason === 'InvalidStateError') {
+    return 'The browser requires screen sharing to start directly from a click. Click Share screen again while this tab is active.';
+  }
+  if (reason === 'NotSupportedError' || /not supported|not implemented/i.test(error?.message || '')) {
+    return 'Screen sharing is unavailable in this browser or device. Use a supported desktop browser.';
+  }
+  return `Could not ${screenSharing ? 'stop' : 'start'} screen sharing${reason ? ` (${reason})` : ''}${error?.message ? `: ${error.message}` : '.'}`;
 }
 
 document.addEventListener('click', async (event) => {
@@ -361,13 +417,23 @@ document.addEventListener('click', async (event) => {
   } else if (id === 'leaveVideoBtn') {
     await leaveVideoRoom();
   } else if (id === 'toggleMicBtn') {
-    microphoneEnabled = !microphoneEnabled;
-    updateVideoControls();
-    withLiveRoom((participant) => participant.setMicrophoneEnabled(microphoneEnabled));
+    const nextState = !microphoneEnabled;
+    withLiveRoom(
+      (participant) => participant.setMicrophoneEnabled(nextState),
+      () => {
+        microphoneEnabled = nextState;
+        updateVideoControls();
+      }
+    );
   } else if (id === 'toggleCamBtn') {
-    cameraEnabled = !cameraEnabled;
-    updateVideoControls();
-    withLiveRoom((participant) => participant.setCameraEnabled(cameraEnabled));
+    const nextState = !cameraEnabled;
+    withLiveRoom(
+      (participant) => participant.setCameraEnabled(nextState),
+      () => {
+        cameraEnabled = nextState;
+        updateVideoControls();
+      }
+    );
   } else if (id === 'shareScreenBtn') {
     await toggleScreenShare(!screenSharing);
   }
@@ -377,4 +443,5 @@ window.addEventListener('pagehide', () => {
   if (liveKitRoom) liveKitRoom.disconnect();
 });
 
+updateVideoControls();
 window.ClassroomVideo = { start: startVideoRoom, leave: leaveVideoRoom };

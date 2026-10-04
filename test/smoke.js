@@ -96,11 +96,13 @@ async function main() {
   const aiPort = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
   const aiCalls = [];
+  const aiAuthHeaders = [];
   const mockAiServer = http.createServer(async (request, response) => {
     let body = '';
     for await (const chunk of request) body += chunk;
     const call = JSON.parse(body);
     aiCalls.push(call);
+    aiAuthHeaders.push(request.headers.authorization);
     const isGrading = call.messages[0].content.includes('Grade each student response');
     const content = isGrading
       ? JSON.stringify({ grades: [{ questionIndex: 2, score: 90, feedback: 'Correct idea with one missing detail.' }] })
@@ -116,7 +118,7 @@ async function main() {
       id: 'chatcmpl-smoke',
       object: 'chat.completion',
       created: Date.now(),
-      model: 'gpt-4o-mini',
+      model: 'nvidia/nemotron-3-super-120b-a12b',
       choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
       usage: { prompt_tokens: 10, completion_tokens: 20, total_tokens: 30 }
     }));
@@ -131,9 +133,9 @@ async function main() {
       VAPID_PUBLIC_KEY: vapidKeys.publicKey,
       VAPID_PRIVATE_KEY: vapidKeys.privateKey,
       VAPID_SUBJECT: 'mailto:smoke-test@example.com',
-      OPENAI_API_KEY: 'smoke-test-openai-key',
-      OPENAI_BASE_URL: `http://127.0.0.1:${aiPort}/v1`,
-      OPENAI_MODEL: 'gpt-4o-mini',
+      AI_PROVIDER: 'nvidia',
+      NVIDIA_API_KEY: 'smoke-test-nvidia-key',
+      NVIDIA_BASE_URL: `http://127.0.0.1:${aiPort}/v1`,
       LIVEKIT_URL: 'wss://livekit.example.test',
       LIVEKIT_API_KEY: 'smoke-test-livekit-key',
       LIVEKIT_API_SECRET: 'smoke-test-livekit-secret-that-is-long-enough'
@@ -158,6 +160,11 @@ async function main() {
     ]) {
       const response = await fetch(`${baseUrl}${page}`);
       assert.equal(response.status, 200, `${page} should be served`);
+      if (page === '/vendor/livekit-client/livekit-client.esm.mjs') {
+        assert.match(response.headers.get('content-type'), /javascript/i, 'LiveKit SDK should be served with a JavaScript MIME type');
+        const sdk = await response.text();
+        assert.ok(sdk.includes('RoomEvent') && sdk.includes('Track'), 'LiveKit SDK response should contain the expected client exports');
+      }
     }
 
     const created = await fetch(`${baseUrl}/create`, { redirect: 'manual' });
@@ -185,6 +192,16 @@ async function main() {
     const videoClaims = JSON.parse(Buffer.from(teacherVideoToken.token.split('.')[1], 'base64url').toString());
     assert.equal(videoClaims.video.room, roomCode, 'LiveKit token must be scoped to the classroom room');
     assert.equal(videoClaims.video.roomJoin, true, 'LiveKit token must allow room joining');
+    const studentVideoTokenResponse = await fetch(`${baseUrl}/api/video/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: roomCode, role: 'student', name: 'Student' })
+    });
+    assert.equal(studentVideoTokenResponse.status, 200, 'students should receive a room-scoped LiveKit token');
+    const studentVideoToken = await studentVideoTokenResponse.json();
+    const studentVideoClaims = JSON.parse(Buffer.from(studentVideoToken.token.split('.')[1], 'base64url').toString());
+    assert.equal(studentVideoClaims.video.room, roomCode, 'student token must be scoped to the classroom room');
+    assert.equal(studentVideoClaims.video.canPublish, true, 'student token must allow opting into camera and microphone');
 
     const pdfSourceText = 'A classroom source describes the core idea, supporting evidence, and why those details matter.';
     const sourcePdf = createTextPdf(pdfSourceText);
@@ -205,7 +222,8 @@ async function main() {
     const generatedQuiz = await generatedQuizResponse.json();
     assert.deepEqual(generatedQuiz.questions.map((question) => question.type), ['mcq', 'true_false', 'short_answer']);
     assert.ok(generatedQuiz.questions[2].rubric, 'generated short-answer questions should include an AI grading rubric');
-    assert.equal(generatedQuiz.model, 'gpt-4o-mini', 'generation response should identify the configured model');
+    assert.equal(generatedQuiz.model, 'nvidia/nemotron-3-super-120b-a12b', 'generation response should identify the configured NVIDIA model');
+    assert.equal(generatedQuiz.provider, 'nvidia', 'generation response should identify the configured AI provider');
 
     const pushKey = await fetch(`${baseUrl}/api/push/key`);
     assert.equal(pushKey.status, 200, 'configured push service should return its public VAPID key');
@@ -352,6 +370,9 @@ async function main() {
     assert.equal(quizEnd.results[0].total, 2, 'teacher results should count submitted answers');
     assert.equal(quizEnd.results[2].pct, 45, 'teacher results should aggregate AI-graded and blank short answers');
     assert.equal(aiCalls.length, 2, 'quiz generation and short-answer grading should both use the configured AI provider');
+    assert.ok(aiCalls.every((call) => call.model === 'nvidia/nemotron-3-super-120b-a12b'), 'generation and grading should both use the configured NVIDIA model');
+    assert.ok(aiCalls.every((call) => call.chat_template_kwargs?.enable_thinking === false), 'NVIDIA requests should disable reasoning text to preserve the app JSON response contract');
+    assert.ok(aiAuthHeaders.every((authorization) => /^Bearer .+$/.test(authorization || '')), 'all AI requests should send a bearer API key');
     const clearedQuiz = await emitAck(teacher, 'quiz-clear', {});
     assert.equal(clearedQuiz.ok, true, 'teacher should be able to clear an ended quiz');
 

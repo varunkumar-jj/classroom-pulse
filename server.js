@@ -63,18 +63,26 @@ if (liveKitUrl && !/^wss:\/\/|^https:\/\//i.test(liveKitUrl)) {
   throw new Error('LIVEKIT_URL must use a secure wss:// or https:// URL.');
 }
 
-/* ===================== OpenAI ===================== */
-const OPENAI_API_KEY = process.env.OPENAI_API_KEY || '';
-const OPENAI_MODEL = process.env.OPENAI_MODEL || 'gpt-4o-mini';
+/* ===================== AI provider ===================== */
+const AI_PROVIDER = process.env.AI_PROVIDER || (process.env.NVIDIA_API_KEY ? 'nvidia' : 'openai');
+if (!['openai', 'nvidia'].includes(AI_PROVIDER)) {
+  throw new Error('AI_PROVIDER must be either "openai" or "nvidia".');
+}
+const AI_MODEL = process.env.AI_MODEL || (AI_PROVIDER === 'nvidia'
+  ? (process.env.NVIDIA_MODEL || 'nvidia/nemotron-3-super-120b-a12b')
+  : (process.env.OPENAI_MODEL || 'gpt-4.1-mini'));
 let openaiClient;
 
 function getOpenAIClient() {
-  if (!OPENAI_API_KEY) throw new Error('OPENAI_API_KEY not configured on this server.');
+  const apiKey = AI_PROVIDER === 'nvidia' ? process.env.NVIDIA_API_KEY : process.env.OPENAI_API_KEY;
+  if (!apiKey) throw new Error(`${AI_PROVIDER === 'nvidia' ? 'NVIDIA_API_KEY' : 'OPENAI_API_KEY'} not configured on this server.`);
   if (!openaiClient) {
     const { OpenAI } = require('openai');
     openaiClient = new OpenAI({
-      apiKey: OPENAI_API_KEY,
-      ...(process.env.OPENAI_BASE_URL ? { baseURL: process.env.OPENAI_BASE_URL } : {})
+      apiKey,
+      baseURL: AI_PROVIDER === 'nvidia'
+        ? (process.env.NVIDIA_BASE_URL || 'https://integrate.api.nvidia.com/v1')
+        : (process.env.OPENAI_BASE_URL || undefined)
     });
   }
   return openaiClient;
@@ -100,13 +108,14 @@ function parseJsonResponse(raw) {
 async function callOpenAIJson({ systemContent, userContent, schemaName, schema, temperature = 0.3, maxTokens, label = 'AI response' }) {
   const client = getOpenAIClient();
   const requestBase = {
-    model: OPENAI_MODEL,
+    model: AI_MODEL,
     messages: [
       { role: 'system', content: systemContent },
       { role: 'user', content: userContent }
     ],
     temperature,
-    max_tokens: maxTokens
+    max_tokens: maxTokens,
+    ...(AI_PROVIDER === 'nvidia' ? { chat_template_kwargs: { enable_thinking: false } } : {})
   };
   const attempts = [
     {
@@ -994,10 +1003,11 @@ app.post('/api/quiz/generate', handleQuizUpload, async (req, res) => {
     }
 
     const questions = await generateQuizFromText(trimmedText, count, difficulty, requestedTypes);
-    res.json({ ok: true, model: OPENAI_MODEL, questions });
+    res.json({ ok: true, model: AI_MODEL, provider: AI_PROVIDER, questions });
   } catch (error) {
     console.error('Quiz generation error:', error);
-    const missingKey = error.message === 'OPENAI_API_KEY not configured on this server.';
+    const missingKey = error.message === 'OPENAI_API_KEY not configured on this server.'
+      || error.message === 'NVIDIA_API_KEY not configured on this server.';
     res.status(missingKey ? 503 : 502).json({
       error: missingKey ? 'AI quiz generation is not configured on this server.' : (error.message || 'Quiz generation failed.')
     });

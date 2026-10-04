@@ -73,17 +73,20 @@ to 100 MB.
 It generates a validated mix of multiple-choice, true/false, and rubric-based
 short-answer questions. Teachers can choose question count, difficulty, and
 types, then review reference answers and rubrics before launching. Objective
-questions are scored locally; short answers are graded by the configured
-OpenAI model and students receive a score with feedback. Treat AI grades as
+questions are scored locally; short answers are graded by the configured AI
+provider and students receive a score with feedback. Treat AI grades as
 assistance: review results before using them for formal assessment.
 
-Configure `OPENAI_API_KEY` on the server. `OPENAI_MODEL` defaults to
-`gpt-4o-mini`; set it to another model that supports structured JSON output if
-needed. If your deployment uses an OpenAI-compatible endpoint, set
-`OPENAI_BASE_URL` as well so the quiz generator and short-answer grader connect
-through that provider. The key stays on the server and must never be put in
-browser code. When a provider rejects JSON-schema formatting, the app retries
-without the strict schema wrapper so OpenAI-compatible services still work.
+Render defaults to NVIDIA NIM using `nvidia/nemotron-3-super-120b-a12b`. Set
+`NVIDIA_API_KEY` on the server; the default endpoint is
+`https://integrate.api.nvidia.com/v1`. You can override the model with
+`AI_MODEL` or `NVIDIA_MODEL` and the endpoint with `NVIDIA_BASE_URL`. For
+backward compatibility, local deployments select NVIDIA automatically when
+`NVIDIA_API_KEY` is present and otherwise default to OpenAI. To use OpenAI
+explicitly, set `AI_PROVIDER=openai`, `OPENAI_API_KEY`, and optionally
+`OPENAI_MODEL` and `OPENAI_BASE_URL`. The keys stay on the server and must
+never be put in browser code. When a provider rejects JSON-schema formatting,
+the app retries without the strict schema wrapper.
 
 Class video uses LiveKit Cloud's SFU instead of a peer-to-peer mesh, so each
 client publishes to the media server rather than uploading media separately to
@@ -97,10 +100,13 @@ Camera, microphone, and screen sharing require a secure HTTPS context and user
 permission. Screen capture also requires a browser that exposes the display
 capture API; use a current desktop browser if the screen-share control reports
 that capture is unsupported. Mobile browser support varies.
+If video fails to connect, check the browser console and server logs, confirm
+the LiveKit URL and credentials belong to the same project, and verify that
+the deployment's firewall/network allows LiveKit WebRTC media traffic.
 
-For a Render Blueprint, set the OpenAI and LiveKit values when prompted or add
-them under the service's **Environment** settings, then redeploy. Keep the
-OpenAI key and LiveKit API secret private; do not commit them.
+For a Render Blueprint, set the NVIDIA and LiveKit values when prompted or add
+them under the service's **Environment** settings, then redeploy. Keep provider
+keys and the LiveKit API secret private; do not commit them.
 
 ## Deploy the Node app
 

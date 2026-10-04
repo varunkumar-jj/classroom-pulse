@@ -9,10 +9,12 @@ services:
     envVars:
       - key: NODE_ENV
         value: production
-      - key: OPENAI_API_KEY
+      - key: AI_PROVIDER
+        value: nvidia
+      - key: AI_MODEL
+        value: nvidia/nemotron-3-super-120b-a12b
+      - key: NVIDIA_API_KEY
         sync: false
-      - key: OPENAI_MODEL
-        value: gpt-4o-mini
       - key: LIVEKIT_URL
         sync: false
       - key: LIVEKIT_API_KEY
