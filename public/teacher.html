@@ -21,6 +21,7 @@
         <div class="toolbar">
           <div class="badge connection-badge" id="connectionBadge">Connecting</div>
           <button id="videoRoomBtn" class="blue" disabled>📹 Start Video Room</button>
+          <a id="participantsManagerLink" class="btn" href="#" aria-disabled="true">👥 Participants</a>
           <button id="nextTopicBtn" class="primary" disabled>Next topic</button>
           <button id="reexplainBtn" disabled>Re-explain</button>
           <a id="reportLink" class="btn" href="#">📊 Report</a>
@@ -282,6 +283,9 @@
           reportLink.href = '/report.html?room=' + encodeURIComponent(roomCode) + '#token=' + encodeURIComponent(token);
           document.getElementById('roomQr').src = '/api/rooms/' + encodeURIComponent(roomCode) + '/qr.svg';
           document.getElementById('videoRoomCode').textContent = roomCode;
+          const managerLink = document.getElementById('participantsManagerLink');
+          managerLink.href = '/participants.html?room=' + encodeURIComponent(roomCode) + '#token=' + encodeURIComponent(token);
+          managerLink.setAttribute('aria-disabled', 'false');
           renderRoom(response.room);
         });
       }

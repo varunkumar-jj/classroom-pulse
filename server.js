@@ -7,7 +7,8 @@ const QRCode = require('qrcode');
 const webpush = require('web-push');
 const multer = require('multer');
 const fs = require('fs');
-const { AccessToken } = require('livekit-server-sdk');
+const { AccessToken, RoomServiceClient, TrackType } = require('livekit-server-sdk');
+const createParticipantsControl = require('./participants-control');
 
 const app = express();
 const server = http.createServer(app);
@@ -62,6 +63,9 @@ if ([liveKitUrl, liveKitApiKey, liveKitApiSecret].some(Boolean) && !liveKitConfi
 if (liveKitUrl && !/^wss:\/\/|^https:\/\//i.test(liveKitUrl)) {
   throw new Error('LIVEKIT_URL must use a secure wss:// or https:// URL.');
 }
+const liveKitRoomService = liveKitConfigured
+  ? new RoomServiceClient(liveKitUrl.replace(/^wss:/i, 'https:'), liveKitApiKey, liveKitApiSecret)
+  : null;
 
 /* ===================== AI provider ===================== */
 const AI_PROVIDER = process.env.AI_PROVIDER || (process.env.NVIDIA_API_KEY ? 'nvidia' : 'openai');
@@ -396,6 +400,16 @@ function safeName(room, id) { const s = room.students.get(id); return s && s.nam
 /* ===================== in-memory state ===================== */
 const rooms = new Map();
 const studentQuestionTime = new Map();
+const participantsControl = createParticipantsControl({
+  io,
+  rooms,
+  liveKit: liveKitRoomService ? {
+    TrackType,
+    getParticipant: (...args) => liveKitRoomService.getParticipant(...args),
+    mutePublishedTrack: (...args) => liveKitRoomService.mutePublishedTrack(...args),
+    removeParticipant: (...args) => liveKitRoomService.removeParticipant(...args)
+  } : null
+});
 
 function createRoom() {
   const code = newRoomCode(rooms);
@@ -1027,6 +1041,10 @@ app.post('/api/video/token', async (req, res) => {
   if (role === 'teacher' && room.teacherToken !== sanitize(req.body?.teacherToken, 80)) {
     return res.status(403).json({ error: 'Teacher authorization failed.' });
   }
+  const admissionTicket = sanitize(req.body?.admissionTicket, 64);
+  if (role === 'student' && !participantsControl.validateAdmissionTicket(code, admissionTicket)) {
+    return res.status(403).json({ error: 'Wait for the teacher to admit you before joining video.' });
+  }
   if (!name) return res.status(400).json({ error: 'Participant name is required.' });
 
   try {
@@ -1043,7 +1061,11 @@ app.post('/api/video/token', async (req, res) => {
       canSubscribe: true,
       canPublishData: true
     });
-    res.json({ url: liveKitUrl, token: await accessToken.toJwt(), identity });
+    const token = await accessToken.toJwt();
+    if (role === 'student' && !participantsControl.consumeAdmissionTicket(code, admissionTicket, identity)) {
+      return res.status(403).json({ error: 'This video admission has expired or has already been used.' });
+    }
+    res.json({ url: liveKitUrl, token, identity });
   } catch (error) {
     console.error(`Could not create a LiveKit token for room ${code}.`, error);
     res.status(500).json({ error: 'Could not start video room. Please try again.' });

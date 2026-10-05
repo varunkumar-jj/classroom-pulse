@@ -9,6 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/style.css" />
     <script src="/socket.io/socket.io.js"></script>
   </head>
   <body>
@@ -23,6 +24,23 @@
       </header>
 
       <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
+      <section id="waitingApproval" class="approval-overlay hidden" role="status" aria-live="polite">
+        <div class="approval-card">
+          <span class="approval-spinner" aria-hidden="true"></span>
+          <p class="eyebrow">CLASSROOM LOBBY</p>
+          <h1>You're in the waiting room</h1>
+          <p>Waiting for your teacher to admit you. You can keep this page open.</p>
+          <span id="approvalRoomLabel" class="badge">Waiting for approval</span>
+        </div>
+      </section>
+      <section id="kickedOverlay" class="approval-overlay hidden" role="alertdialog" aria-modal="true" aria-labelledby="kickedTitle">
+        <div class="approval-card">
+          <p class="eyebrow">CLASSROOM UPDATE</p>
+          <h1 id="kickedTitle">You've been removed from class</h1>
+          <p id="kickReason"></p>
+          <button id="returnHomeBtn" class="primary" type="button">Return to Home</button>
+        </div>
+      </section>
 
       <!-- Live Quiz Overlay -->
       <div id="liveQuizOverlay" class="live-quiz-overlay hidden">
@@ -127,6 +145,18 @@
         <h2>Questions</h2>
         <ul id="questionList" class="list"></ul>
       </section>
+      <section id="studentChatCard" class="card hidden" style="margin-top: 20px;">
+        <div class="row">
+          <h2>Class chat</h2>
+          <span class="badge">Live class</span>
+        </div>
+        <div id="studentChatMessages" class="student-chat-messages" role="log" aria-live="polite"></div>
+        <form id="studentChatForm" class="student-chat-form">
+          <label class="sr-only" for="studentChatInput">Message to the class</label>
+          <input id="studentChatInput" maxlength="1000" placeholder="Message everyone in class…" autocomplete="off" required />
+          <button class="primary" type="submit">Send</button>
+        </form>
+      </section>
     </div>
 
     <script>
@@ -146,11 +176,17 @@
       const connectionBadge = document.getElementById('connectionBadge');
       const questionCount = document.getElementById('questionCount');
       const joinVideoBtn = document.getElementById('joinVideoBtn');
+      const studentChatCard = document.getElementById('studentChatCard');
+      const studentChatForm = document.getElementById('studentChatForm');
+      const studentChatInput = document.getElementById('studentChatInput');
+      const studentChatMessages = document.getElementById('studentChatMessages');
       const socket = io();
       let studentId = localStorage.getItem('classroom-pulse-student-id') || '';
       let joined = false;
+      let kicked = false;
       let reexplainActive = false;
       let reexplainAnswered = false;
+      window.classroomSocket = socket;
 
       if (roomCode) roomInput.value = roomCode;
 
@@ -171,21 +207,104 @@
       }
 
       function joinRoom(isReconnect = false) {
+        if (kicked) return;
         const code = (roomInput.value || '').trim().toUpperCase();
         const name = (document.getElementById('studentName').value || '').trim();
         if (!code) { showStatus('Choose a room code first.', 'error'); return; }
         socket.emit('student-join', { code, name, id: studentId }, function (response) {
           if (!response || !response.ok) { showStatus(response?.err || 'Unable to join this room.', 'error'); return; }
-          joined = true;
           studentId = response.id;
           localStorage.setItem('classroom-pulse-student-id', studentId);
-          roomBadge.textContent = 'Room: ' + code;
-          if (!isReconnect) showStatus('You joined room ' + code + '.', 'success');
-          votePanel.classList.remove('hidden');
-          joinVideoBtn.classList.remove('hidden');
-          syncControls();
+          socket.emit('join-lobby', { code, name: name || 'Student' }, function (lobbyResponse) {
+            if (!lobbyResponse || !lobbyResponse.ok) {
+              joined = false;
+              showStatus(lobbyResponse?.err || 'Unable to enter the waiting room.', 'error');
+              return;
+            }
+            joined = true;
+            roomBadge.textContent = 'Room: ' + code;
+            votePanel.classList.remove('hidden');
+            if (lobbyResponse.status === 'WAITING') {
+              studentChatCard.classList.add('hidden');
+              document.getElementById('approvalRoomLabel').textContent = 'Room ' + code + ' • Waiting for approval';
+              document.getElementById('waitingApproval').classList.remove('hidden');
+              joinVideoBtn.classList.add('hidden');
+              showStatus('You are in the lobby. Waiting for your teacher to admit you.', 'info');
+            } else if (lobbyResponse.admissionTicket) {
+              enterVideoRoom(lobbyResponse.admissionTicket);
+            }
+            syncControls();
+          });
         });
       }
+
+      function enterVideoRoom(admissionTicket) {
+        if (kicked || typeof admissionTicket !== 'string' || !admissionTicket) return;
+        window.classroomAdmissionTicket = admissionTicket;
+        document.getElementById('waitingApproval').classList.add('hidden');
+        studentChatCard.classList.remove('hidden');
+        joinVideoBtn.classList.remove('hidden');
+        showStatus('Your teacher admitted you. Connecting to the video room…', 'success');
+        const startVideo = function () {
+          window.ClassroomVideo.start().catch((error) => {
+            showStatus(error.message || 'Could not start the video room.', 'error');
+          });
+        };
+        if (window.ClassroomVideo) startVideo();
+        else window.addEventListener('classroom-video-ready', startVideo, { once: true });
+      }
+
+      socket.on('participant-admitted', function (result) {
+        if (result) enterVideoRoom(result.admissionTicket);
+      });
+
+      socket.on('participant-kicked', function (result) {
+        kicked = true;
+        joined = false;
+        window.classroomAdmissionTicket = '';
+        document.getElementById('waitingApproval').classList.add('hidden');
+        studentChatCard.classList.add('hidden');
+        document.getElementById('kickReason').textContent = result?.reason || 'Your teacher ended your access to this classroom.';
+        document.getElementById('kickedOverlay').classList.remove('hidden');
+        if (window.ClassroomVideo) window.ClassroomVideo.leave();
+        syncControls();
+      });
+      document.getElementById('returnHomeBtn').addEventListener('click', function () {
+        window.location.assign('/home.html');
+      });
+
+      function appendClassMessage(item, isPrivate = false) {
+        const message = document.createElement('article');
+        message.className = 'student-chat-message' + (isPrivate ? ' private' : '');
+        const header = document.createElement('div');
+        header.className = 'student-chat-meta';
+        const sender = document.createElement('strong');
+        sender.textContent = isPrivate ? item.from + ' · Private' : item.from;
+        const time = document.createElement('time');
+        time.textContent = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        const content = document.createElement('p');
+        content.textContent = item.message;
+        header.append(sender, time);
+        message.append(header, content);
+        studentChatMessages.appendChild(message);
+        studentChatMessages.scrollTop = studentChatMessages.scrollHeight;
+      }
+
+      socket.on('classroom-message', function (item) {
+        if (item && typeof item.message === 'string') appendClassMessage(item);
+      });
+      socket.on('private-chat-message', function (item) {
+        if (item && typeof item.message === 'string') appendClassMessage(item, true);
+      });
+      studentChatForm.addEventListener('submit', function (event) {
+        event.preventDefault();
+        const message = studentChatInput.value.trim();
+        if (!message || !joined || kicked) return;
+        socket.emit('classroom-message', { message }, function (response) {
+          if (!response?.ok) return showStatus(response?.err || 'Could not send your message.', 'error');
+          studentChatInput.value = '';
+        });
+      });
 
       joinForm.addEventListener('submit', function (event) { event.preventDefault(); joinRoom(); });
       questionInput.addEventListener('input', function () { questionCount.textContent = this.value.length + ' / 140'; });
@@ -247,7 +366,7 @@
         connectionBadge.textContent = 'Connected';
         connectionBadge.classList.add('connected');
         connectionBadge.classList.remove('disconnected');
-        if (joined) joinRoom(true);
+        if (joined && !kicked) joinRoom(true);
         syncControls();
       });
       socket.on('disconnect', function () {
@@ -445,6 +564,8 @@
         role: 'student',
         getCode: () => roomInput.value.trim().toUpperCase(),
         getName: () => document.getElementById('studentName').value.trim() || 'Student',
+        getAdmissionTicket: () => window.classroomAdmissionTicket || '',
+        isAllowed: () => !kicked,
         onState: (message, type) => showStatus(message, type)
       };
     </script>

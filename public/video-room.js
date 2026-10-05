@@ -163,7 +163,8 @@ async function fetchJoinToken(config) {
       code: config.getCode(),
       role: config.role,
       name: config.getName(),
-      teacherToken: config.role === 'teacher' ? config.getTeacherToken() : undefined
+      teacherToken: config.role === 'teacher' ? config.getTeacherToken() : undefined,
+      admissionTicket: config.role === 'student' ? config.getAdmissionTicket?.() : undefined
     })
   });
   let data;
@@ -177,7 +178,24 @@ async function fetchJoinToken(config) {
     || typeof data.url !== 'string' || typeof data.token !== 'string' || !data.url || !data.token) {
     throw new Error('Video authorization did not return a room URL and access token.');
   }
+  if (config.role === 'student' && (typeof data.identity !== 'string' || !data.identity.startsWith('student-'))) {
+    throw new Error('Video authorization did not return a valid participant identity.');
+  }
   return data;
+}
+
+async function registerStudentVideoIdentity(identity) {
+  const socket = window.classroomSocket;
+  if (!socket?.connected) throw new Error('Reconnect to the classroom before joining video.');
+  await new Promise((resolve, reject) => {
+    socket.timeout(5000).emit('register-video-identity', { identity }, (timeoutError, response) => {
+      if (timeoutError) return reject(new Error('The classroom could not confirm your video admission.'));
+      if (!response?.ok || response.removed) {
+        return reject(new Error(response?.err || 'Video admission is no longer valid.'));
+      }
+      resolve();
+    });
+  });
 }
 
 async function startVideoRoom() {
@@ -192,7 +210,9 @@ async function startVideoRoom() {
 
   try {
     const credentials = await fetchJoinToken(config);
+    if (config.isAllowed && !config.isAllowed()) throw new Error('Video access has been revoked.');
     if (!liveKitClient) liveKitClient = await import(LIVEKIT_CLIENT_URL);
+    if (config.isAllowed && !config.isAllowed()) throw new Error('Video access has been revoked.');
     const room = new liveKitClient.Room({ adaptiveStream: true, dynacast: true });
     liveKitRoom = room;
     leavingRoom = false;
@@ -249,6 +269,21 @@ async function startVideoRoom() {
     if (videoCode) videoCode.textContent = config.getCode();
     updateConnectionStatus('Connecting', null);
     await room.connect(credentials.url, credentials.token);
+    if (config.isAllowed && !config.isAllowed()) {
+      leavingRoom = true;
+      liveKitRoom = null;
+      await room.disconnect();
+      finishVideoRoom();
+      return;
+    }
+    if (config.role === 'student') await registerStudentVideoIdentity(credentials.identity);
+    if ((config.isAllowed && !config.isAllowed()) || liveKitRoom !== room) {
+      leavingRoom = true;
+      if (liveKitRoom === room) liveKitRoom = null;
+      await room.disconnect();
+      finishVideoRoom();
+      return;
+    }
     getParticipantTile(room.localParticipant, true);
     for (const participant of room.remoteParticipants.values()) {
       getParticipantTile(participant);
@@ -443,5 +478,18 @@ window.addEventListener('pagehide', () => {
   if (liveKitRoom) liveKitRoom.disconnect();
 });
 
+window.classroomSocket?.on('force-mute', ({ muted }) => {
+  if (typeof muted !== 'boolean' || !liveKitRoom) return;
+  liveKitRoom.localParticipant.setMicrophoneEnabled(!muted).then(() => {
+    microphoneEnabled = !muted;
+    updateVideoControls();
+    report(muted ? 'Your teacher muted your microphone.' : 'Your teacher allowed your microphone again.', 'info');
+  }).catch((error) => {
+    console.error('Could not apply a teacher microphone control.', error);
+    report('The teacher changed your microphone setting, but your device could not apply it.', 'error');
+  });
+});
+
 updateVideoControls();
 window.ClassroomVideo = { start: startVideoRoom, leave: leaveVideoRoom };
+window.dispatchEvent(new Event('classroom-video-ready'));

@@ -5,8 +5,70 @@ const path = require('node:path');
 const { spawn } = require('node:child_process');
 const { io } = require('socket.io-client');
 const webpush = require('web-push');
+const createParticipantsControl = require('../participants-control');
 
 const root = path.resolve(__dirname, '..');
+
+async function testKickedPendingVideoIdentity() {
+  const sockets = new Map();
+  let onConnection;
+  const removedIdentities = [];
+  const ioStub = {
+    sockets: { sockets },
+    on(event, handler) {
+      if (event === 'connection') onConnection = handler;
+    },
+    to() { return { emit() {} }; }
+  };
+  const roomCode = 'TEST';
+  const control = createParticipantsControl({
+    io: ioStub,
+    rooms: new Map([[roomCode, { teacherToken: 'host-secret' }]]),
+    liveKit: {
+      TrackType: { AUDIO: 'audio' },
+      async getParticipant() { return { tracks: [] }; },
+      async mutePublishedTrack() {},
+      async removeParticipant(_code, identity) { removedIdentities.push(identity); }
+    }
+  });
+  function makeSocket(id) {
+    const handlers = new Map();
+    const socket = {
+      id,
+      data: {},
+      connected: true,
+      on(event, handler) { handlers.set(event, handler); },
+      join() {},
+      leave() {},
+      emit() {},
+      disconnect() { this.connected = false; },
+      handlers
+    };
+    sockets.set(id, socket);
+    onConnection(socket);
+    return socket;
+  }
+  function emitAck(socket, event, payload) {
+    return new Promise((resolve) => socket.handlers.get(event)(payload, resolve));
+  }
+
+  const host = makeSocket('host-socket');
+  const student = makeSocket('student-socket');
+  assert.equal((await emitAck(student, 'join-lobby', { code: roomCode, name: 'Student' })).status, 'WAITING');
+  assert.equal((await emitAck(host, 'host-join', { code: roomCode, token: 'host-secret' })).ok, true);
+  assert.equal((await emitAck(host, 'admit-participant', { code: roomCode, participantId: student.id })).ok, true);
+  const admissionTicket = control.participants.get(student.id).admissionTicket;
+  const identity = 'student-livekit-pending';
+  assert.equal(control.consumeAdmissionTicket(roomCode, admissionTicket, identity), true);
+  assert.equal((await emitAck(host, 'kick-participant', {
+    code: roomCode,
+    participantId: student.id,
+    reason: 'Test pending video removal'
+  })).ok, true);
+  assert.ok(removedIdentities.includes(identity), 'kick should remove the pending LiveKit identity');
+  assert.deepEqual(await emitAck(student, 'register-video-identity', { identity }), { ok: true, removed: true });
+  assert.equal(removedIdentities.filter((item) => item === identity).length, 2, 'late video registration should be removed again');
+}
 
 function reservePort() {
   return new Promise((resolve, reject) => {
@@ -92,6 +154,7 @@ async function waitForHealth(url, server) {
 }
 
 async function main() {
+  await testKickedPendingVideoIdentity();
   const port = await reservePort();
   const aiPort = await reservePort();
   const baseUrl = `http://127.0.0.1:${port}`;
@@ -153,7 +216,8 @@ async function main() {
     assert.deepEqual(await health.json(), { status: 'ok' });
 
     for (const page of [
-      '/home.html', '/student.html', '/teacher.html', '/report.html', '/styles.css', '/video-room.js',
+      '/home.html', '/student.html', '/teacher.html', '/participants.html', '/participants.js',
+      '/report.html', '/styles.css', '/style.css', '/video-room.js',
       '/vendor/livekit-client/livekit-client.esm.mjs',
       '/service-worker.js', '/vendor/qr-scanner/qr-scanner.min.js',
       '/vendor/qr-scanner/qr-scanner-worker.min.js'
@@ -197,11 +261,7 @@ async function main() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ code: roomCode, role: 'student', name: 'Student' })
     });
-    assert.equal(studentVideoTokenResponse.status, 200, 'students should receive a room-scoped LiveKit token');
-    const studentVideoToken = await studentVideoTokenResponse.json();
-    const studentVideoClaims = JSON.parse(Buffer.from(studentVideoToken.token.split('.')[1], 'base64url').toString());
-    assert.equal(studentVideoClaims.video.room, roomCode, 'student token must be scoped to the classroom room');
-    assert.equal(studentVideoClaims.video.canPublish, true, 'student token must allow opting into camera and microphone');
+    assert.equal(studentVideoTokenResponse.status, 403, 'students must be admitted before receiving a LiveKit token');
 
     const pdfSourceText = 'A classroom source describes the core idea, supporting evidence, and why those details matter.';
     const sourcePdf = createTextPdf(pdfSourceText);
@@ -260,6 +320,8 @@ async function main() {
     assert.equal(teacherJoin.ok, true, 'teacher should be able to join the created room');
     const wrongTeacher = await emitAck(teacher, 'teacher-join', { code: roomCode, token: 'invalid' });
     assert.equal(wrongTeacher.ok, false, 'invalid teacher token should be rejected');
+    const hostJoin = await emitAck(teacher, 'host-join', { code: roomCode, token });
+    assert.equal(hostJoin.ok, true, 'host-only participant controls should accept the room teacher token');
 
     const participants = await Promise.all(Array.from({ length: 50 }, async (_, index) => {
       const student = await connect(baseUrl);
@@ -273,9 +335,77 @@ async function main() {
         name: `Student ${index + 1}`
       });
       assert.equal(joined.ok, true, `student ${index + 1} should join`);
+      const lobbyJoin = await emitAck(student, 'join-lobby', {
+        code: roomCode,
+        name: `Student ${index + 1}`
+      });
+      assert.equal(lobbyJoin.ok, true, `student ${index + 1} should enter the approval lobby`);
+      assert.equal(lobbyJoin.status, 'WAITING', `student ${index + 1} should wait for teacher approval`);
       return { socket: student, update };
     }));
     const students = participants.map((participant) => participant.socket);
+    const firstAdmitted = new Promise((resolve) => students[0].once('participant-admitted', resolve));
+    const deniedHostAction = await emitAck(students[0], 'admit-participant', {
+      code: roomCode,
+      participantId: students[1].id
+    });
+    assert.equal(deniedHostAction.ok, false, 'participants must not be able to admit other students');
+    const admitted = await emitAck(teacher, 'admit-participant', {
+      code: roomCode,
+      participantId: students[0].id
+    });
+    assert.equal(admitted.ok, true, 'host should be able to admit a waiting participant');
+    const admission = await firstAdmitted;
+    assert.equal(typeof admission.admissionTicket, 'string', 'admission should issue a scoped video ticket');
+    const broadcastChat = new Promise((resolve) => students[0].once('classroom-message', resolve));
+    assert.equal((await emitAck(teacher, 'classroom-message', {
+      code: roomCode,
+      message: 'Welcome to the live class.'
+    })).ok, true, 'host should be able to broadcast to admitted participants');
+    assert.equal((await broadcastChat).message, 'Welcome to the live class.', 'admitted students should receive class broadcasts');
+    const privateChat = new Promise((resolve) => students[0].once('private-chat-message', resolve));
+    assert.equal((await emitAck(teacher, 'private-chat-message', {
+      code: roomCode,
+      participantId: students[0].id,
+      message: 'Please check in with me after class.'
+    })).ok, true, 'host should be able to privately message a participant');
+    assert.equal((await privateChat).message, 'Please check in with me after class.', 'private messages should reach only their recipient');
+    const admittedTokenResponse = await fetch(`${baseUrl}/api/video/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: roomCode,
+        role: 'student',
+        name: 'Student 1',
+        admissionTicket: admission.admissionTicket
+      })
+    });
+    assert.equal(admittedTokenResponse.status, 200, 'an admitted student should receive a LiveKit token');
+    const admittedVideoToken = await admittedTokenResponse.json();
+    const admittedVideoClaims = JSON.parse(Buffer.from(admittedVideoToken.token.split('.')[1], 'base64url').toString());
+    assert.equal(admittedVideoClaims.video.room, roomCode, 'student token must be scoped to the classroom room');
+    assert.equal(admittedVideoClaims.video.canPublish, true, 'student token must allow opting into camera and microphone');
+    const replayedAdmission = await fetch(`${baseUrl}/api/video/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        code: roomCode,
+        role: 'student',
+        name: 'Student 1',
+        admissionTicket: admission.admissionTicket
+      })
+    });
+    assert.equal(replayedAdmission.status, 403, 'admission tickets should be single-use');
+    assert.equal((await emitAck(teacher, 'mute-participant', {
+      code: roomCode,
+      participantId: students[0].id,
+      muted: true
+    })).ok, true, 'host should be able to mute an admitted participant');
+    assert.equal((await emitAck(teacher, 'mute-participant', {
+      code: roomCode,
+      participantId: students[0].id,
+      muted: false
+    })).ok, true, 'host should be able to unmute an admitted participant');
     const studentSnapshot = await participants[0].update;
     assert.deepEqual(Object.keys(studentSnapshot).sort(), ['code', 'currentTopic', 'quiz', 'reexplain'].sort(), 'student updates should only expose student-safe room data');
     assert.equal(studentSnapshot.quiz, null, 'inactive quizzes should not be exposed to students');
@@ -379,7 +509,20 @@ async function main() {
     const malformedTopics = await emitAck(teacher, 'set-topics', { topics: 'not-an-array' });
     assert.equal(malformedTopics.ok, false, 'malformed topic payload should be rejected without crashing');
 
-    console.log(`PASS: health/static routes; room QR and push authorization; authorized LiveKit room tokens; validated AI quiz generation; teacher room; 50 students; 50 random votes (${JSON.stringify(expected)}); question/upvotes; topics; moderation; re-explain; report; student-safe mixed quiz; objective and mock-AI short-answer grading; invalid-input checks.`);
+    const kickNotice = new Promise((resolve) => students[1].once('participant-kicked', resolve));
+    const kickedDisconnect = new Promise((resolve) => students[1].once('disconnect', resolve));
+    const kicked = await emitAck(teacher, 'kick-participant', {
+      code: roomCode,
+      participantId: students[1].id,
+      reason: 'Smoke-test removal'
+    });
+    assert.equal(kicked.ok, true, 'host should be able to kick a participant');
+    assert.equal(kicked.reason, 'Smoke-test removal');
+    assert.equal(typeof kicked.timestamp, 'number', 'kick response should include its timestamp');
+    assert.equal((await kickNotice).reason, 'Smoke-test removal', 'kicked participant should receive the reason');
+    await kickedDisconnect;
+
+    console.log(`PASS: health/static routes; room QR and push authorization; authenticated host and student approval lifecycle; one-time LiveKit admission; mute/unmute/kick controls; validated AI quiz generation; teacher room; 50 students; 50 random votes (${JSON.stringify(expected)}); question/upvotes; topics; moderation; re-explain; report; student-safe mixed quiz; objective and mock-AI short-answer grading; invalid-input checks.`);
   } catch (error) {
     console.error(error);
     if (serverOutput) console.error(serverOutput);

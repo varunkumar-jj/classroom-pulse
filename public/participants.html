@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#090d18" />
+    <title>Participants Manager | Classroom Pulse</title>
+    <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/socket.io/socket.io.js"></script>
+  </head>
+  <body class="manager-page">
+    <main class="manager-shell">
+      <header class="manager-header">
+        <div>
+          <a class="manager-brand" href="/teacher.html">✳ Classroom Pulse</a>
+          <h1>Participants Manager</h1>
+          <p id="roomLabel" class="manager-subtitle">Connecting to your classroom…</p>
+        </div>
+        <div class="manager-stats" aria-live="polite">
+          <div class="manager-stat"><strong id="totalCount">0</strong><span>Total</span></div>
+          <div class="manager-stat"><strong id="liveCount">0</strong><span>Live</span></div>
+          <div class="manager-stat"><strong id="waitingCount">0</strong><span>Waiting</span></div>
+        </div>
+      </header>
+
+      <nav class="manager-tabs" role="tablist" aria-label="Classroom channels">
+        <button id="tab-lobby" class="manager-tab active" type="button" role="tab" aria-selected="true" aria-controls="channel-lobby" tabindex="0" data-channel="lobby">Lobby <span id="lobbyTabCount">0</span></button>
+        <button id="tab-live" class="manager-tab" type="button" role="tab" aria-selected="false" aria-controls="channel-live" tabindex="-1" data-channel="live">Live class <span id="liveTabCount">0</span></button>
+        <button id="tab-chat" class="manager-tab" type="button" role="tab" aria-selected="false" aria-controls="channel-chat" tabindex="-1" data-channel="chat">Chat</button>
+      </nav>
+
+      <section class="manager-channel active" id="channel-lobby" role="tabpanel" aria-labelledby="tab-lobby" tabindex="0">
+        <div class="channel-heading">
+          <div><p class="eyebrow">MAIN ROOM</p><h2>Waiting for approval</h2></div>
+          <span class="channel-description">Admit participants into the live class or remove them from the lobby.</span>
+        </div>
+        <div id="lobbyList" class="participant-list" aria-live="polite"></div>
+      </section>
+
+      <section class="manager-channel" id="channel-live" role="tabpanel" aria-labelledby="tab-live" tabindex="0">
+        <div class="channel-heading">
+          <div><p class="eyebrow">VIDEO ROOM</p><h2>Live class</h2></div>
+          <span class="channel-description">Mute a participant or remove them at any time.</span>
+        </div>
+        <div id="liveList" class="participant-list live-participant-list" aria-live="polite"></div>
+        <div class="manager-video-wrap">
+          <div class="manager-video-title">
+            <div><h3>Class video</h3><span id="videoConnectionStatus" class="badge">Not connected</span></div>
+            <span id="videoPeerCount" class="badge">0 participants</span>
+          </div>
+          <div id="videoRoom" class="video-room manager-video-room hidden">
+            <div id="videoGrid" class="video-grid">
+              <div class="video-waiting"><h3>Select Live class to connect</h3></div>
+            </div>
+            <div class="video-controls">
+              <button id="toggleMicBtn" class="ctrl-btn" disabled>🎙️ <span>Mic Off</span></button>
+              <button id="toggleCamBtn" class="ctrl-btn" disabled>📷 <span>Camera Off</span></button>
+              <button id="shareScreenBtn" class="ctrl-btn" disabled>🖥️ <span>Share screen</span></button>
+              <button id="leaveVideoBtn" class="ctrl-btn end" disabled>📵 <span>Leave video</span></button>
+            </div>
+          </div>
+          <button id="videoRoomBtn" class="primary" type="button">Connect to class video</button>
+        </div>
+      </section>
+
+      <section class="manager-channel" id="channel-chat" role="tabpanel" aria-labelledby="tab-chat" tabindex="0">
+        <div class="channel-heading">
+          <div><p class="eyebrow">CLASSROOM CHANNEL</p><h2>Chat</h2></div>
+          <span class="channel-description">Send a message to the class or directly to a participant.</span>
+        </div>
+        <div class="chat-card">
+          <div id="chatMessages" class="chat-messages" role="log" aria-live="polite"></div>
+          <form id="chatForm" class="chat-form">
+            <label class="sr-only" for="chatRecipient">Message recipient</label>
+            <select id="chatRecipient"><option value="">Everyone in class</option></select>
+            <label class="sr-only" for="chatInput">Message</label>
+            <input id="chatInput" maxlength="1000" placeholder="Write a message…" autocomplete="off" required />
+            <button class="primary" type="submit">Send</button>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <dialog id="kickDialog" class="kick-dialog">
+      <form id="kickForm" method="dialog">
+        <p class="eyebrow">REMOVE PARTICIPANT</p>
+        <h2>Are you sure?</h2>
+        <p id="kickTargetLabel" class="manager-subtitle"></p>
+        <label for="kickReason">Reason</label>
+        <textarea id="kickReason" minlength="3" maxlength="300" required placeholder="Explain why this participant is being removed."></textarea>
+        <div class="dialog-actions">
+          <button type="button" id="cancelKickBtn">Cancel</button>
+          <button class="danger-button" type="submit">Kick participant</button>
+        </div>
+      </form>
+    </dialog>
+    <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
+    <div id="managerError" class="manager-error hidden" role="alert"></div>
+
+    <script src="/participants.js" defer></script>
+    <script type="module" src="/video-room.js"></script>
+  </body>
+</html>

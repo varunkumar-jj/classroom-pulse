@@ -108,6 +108,61 @@ For a Render Blueprint, set the NVIDIA and LiveKit values when prompted or add
 them under the service's **Environment** settings, then redeploy. Keep provider
 keys and the LiveKit API secret private; do not commit them.
 
+## Lobby, approval, and the Participants Manager
+
+Students join a per-room **lobby** first and stay in a waiting screen until the
+teacher admits them into the **live class** video room. Teachers open the
+**Participants** button on their dashboard to reach `/participants.html`, a
+channelised control panel with a **Lobby** channel (admit or kick), a **Live
+class** channel (video grid plus per-tile mute and kick), and a **Chat** channel
+(class broadcast or a private message to one participant). The header shows
+total, live, and waiting counts, and every change arrives over Socket.IO, so the
+page never needs a refresh.
+
+Server state lives in a single `Map` keyed by socket id, holding each entry's
+name, role, status, and room. Statuses are `WAITING`, `ADMITTED`, `MUTED`,
+`KICKED`, and `LEFT`. Room-code scoping keeps separate classes isolated, and
+every privileged handler re-checks the caller is an authenticated host for that
+same room, so a client cannot claim a role it does not have. Kicking emits
+`participant-kicked` with a reason and timestamp, removes the student from the
+LiveKit room, and then disconnects the socket; kicking an already-removed
+participant returns success instead of failing. Video admission uses short-lived,
+single-use tickets: `/api/video/token` refuses to issue a student LiveKit token
+unless a valid admission ticket is presented, so a student cannot skip the lobby
+by calling the endpoint directly.
+
+### Integration checklist
+
+The feature is already wired in. These are the exact integration points if you
+need to re-apply or review them.
+
+New files:
+
+- `participants-control.js` — host-only event handlers and the participants map.
+- `public/participants.html` — the three-channel Participants Manager page.
+- `public/participants.js` — live roster rendering, controls, chat, toasts.
+- `public/style.css` — dark dashboard styling for the manager, lobby, and chat.
+
+Edits to existing files:
+
+- `server.js`: `require('./participants-control')` next to the other requires;
+  create the `liveKitRoomService` client from `RoomServiceClient`; call
+  `createParticipantsControl({ io, rooms, liveKit })` after `rooms` is declared;
+  validate the admission ticket before issuing a student token in
+  `POST /api/video/token`, and consume it after the token is built.
+- `public/teacher.html`: the `participantsManagerLink` button, whose `href` is
+  set to `/participants.html?room=<code>#token=<token>` after the teacher
+  authenticates.
+- `public/student.html`: the `style.css` link, the waiting-lobby and kicked
+  overlays, the class chat card, the `join-lobby` call in `joinRoom`, and the
+  `participant-admitted`, `participant-kicked`, and chat listeners.
+- `public/video-room.js`: send `admissionTicket` with the token request, emit
+  `register-video-identity` once connected, and apply `force-mute` to the local
+  microphone.
+- `test/smoke.js`: covers host authentication, the student-cannot-admit check,
+  single-use admission tickets, mute/unmute, kick with reason, and the new
+  static pages.
+
 ## Deploy the Node app
 
 The existing app needs a Node host that supports long-lived Socket.IO
