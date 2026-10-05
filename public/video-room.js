@@ -493,3 +493,79 @@ window.classroomSocket?.on('force-mute', ({ muted }) => {
 updateVideoControls();
 window.ClassroomVideo = { start: startVideoRoom, leave: leaveVideoRoom };
 window.dispatchEvent(new Event('classroom-video-ready'));
+
+/* ============================================================
+   IN-VIDEO-ROOM CHAT
+   Reuses the existing classroom-message/private-chat-message events,
+   so the same conversation continues from inside the video
+   overlay without adding a second messaging channel on the server.
+   ============================================================ */
+(function initVideoChat() {
+  const panel = document.getElementById('videoChatPanel');
+  const toggle = document.getElementById('videoChatToggle');
+  const list = document.getElementById('videoChatMessages');
+  const form = document.getElementById('videoChatForm');
+  const input = document.getElementById('videoChatText');
+  const close = document.getElementById('videoChatClose');
+  if (!panel || !toggle || !list || !form || !input) return;
+
+  let unread = 0;
+  const toggleLabel = toggle.querySelector('span');
+
+  function setOpen(open) {
+    panel.classList.toggle('hidden', !open);
+    toggle.setAttribute('aria-expanded', String(open));
+    if (open) {
+      unread = 0;
+      if (toggleLabel) toggleLabel.textContent = 'Chat';
+      input.focus();
+    }
+  }
+
+  function append(item, isPrivate) {
+    const row = document.createElement('article');
+    row.className = 'video-chat-message' + (isPrivate ? ' private' : '');
+    const who = document.createElement('strong');
+    who.textContent = isPrivate ? item.from + ' · Private' : item.from;
+    const time = document.createElement('time');
+    time.dateTime = new Date(item.timestamp).toISOString();
+    time.textContent = new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    const body = document.createElement('p');
+    body.textContent = item.message;
+    row.append(who, time, body);
+    list.appendChild(row);
+    list.scrollTop = list.scrollHeight;
+    // A closed panel still needs to advertise that something arrived.
+    if (panel.classList.contains('hidden')) {
+      unread += 1;
+      if (toggleLabel) toggleLabel.textContent = 'Chat (' + unread + ')';
+    }
+  }
+
+  toggle.addEventListener('click', () => setOpen(panel.classList.contains('hidden')));
+  close?.addEventListener('click', () => setOpen(false));
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    const message = input.value.trim();
+    const config = window.classroomVideoConfig;
+    const socket = window.classroomSocket;
+    if (!message || !config || !socket) return;
+    input.value = '';
+    socket.emit('classroom-message', { code: config.getCode(), message }, (response) => {
+      if (response && response.ok === false) {
+        input.value = message;
+        report(response.err || 'Message not sent.', 'error');
+      }
+    });
+  });
+
+  function bind(socket) {
+    if (!socket || socket.__videoChatBound) return;
+    socket.__videoChatBound = true;
+    socket.on('classroom-message', (item) => { if (item?.message) append(item, false); });
+    socket.on('private-chat-message', (item) => { if (item?.message) append(item, true); });
+  }
+  bind(window.classroomSocket);
+  window.addEventListener('classroom-socket-ready', (event) => bind(event.detail));
+})();

@@ -1,37 +1,55 @@
 (() => {
   'use strict';
 
+  // Works both as a standalone page and embedded in the teacher dashboard.
+  // When embedded, teacher.html hands over its existing socket and credentials
+  // so we never open a second connection or fight over the video globals.
+  const hostConfig = window.ParticipantsManagerConfig || null;
   const params = new URLSearchParams(window.location.search);
-  const roomCode = (params.get('room') || '').trim().toUpperCase();
-  const teacherToken = new URLSearchParams(window.location.hash.slice(1)).get('token')
+  const roomCode = (hostConfig?.roomCode || params.get('room') || '').trim().toUpperCase();
+  const teacherToken = hostConfig?.teacherToken
+    || new URLSearchParams(window.location.hash.slice(1)).get('token')
     || params.get('token')
     || '';
-  const socket = io();
+  const socket = hostConfig?.socket || io();
   const state = { authenticated: false, participants: [], pendingKick: null };
   const lobbyList = document.getElementById('lobbyList');
   const liveList = document.getElementById('liveList');
   const kickDialog = document.getElementById('kickDialog');
 
+  // Optional elements are absent depending on which page is hosting us, so
+  // every one of them is looked up defensively rather than at load time.
+  const byId = (id) => document.getElementById(id);
+  const setText = (id, value) => { const node = byId(id); if (node) node.textContent = value; };
+
   window.classroomSocket = socket;
-  window.classroomVideoConfig = {
-    role: 'teacher',
-    getCode: () => roomCode,
-    getTeacherToken: () => teacherToken,
-    getName: () => 'Teacher',
-    onState: (message, type) => showToast(message, type === 'error' ? 'error' : 'success')
-  };
+  // On the standalone page this script owns the video globals. Inside the
+  // teacher dashboard teacher.html has already configured them, and
+  // overwriting here would break the teacher's own video room.
+  if (!hostConfig && !window.classroomVideoConfig) {
+    window.classroomVideoConfig = {
+      role: 'teacher',
+      getCode: () => roomCode,
+      getTeacherToken: () => teacherToken,
+      getName: () => 'Teacher',
+      onState: (message, type) => showToast(message, type === 'error' ? 'error' : 'success')
+    };
+  }
 
   function showError(message) {
-    const region = document.getElementById('managerError');
+    const region = byId('managerError');
+    if (!region) return;
     region.textContent = message;
     region.classList.remove('hidden');
   }
 
   function showToast(message, type = 'success') {
+    const region = byId('toastRegion');
+    if (!region) return;
     const toast = document.createElement('div');
     toast.className = `manager-toast ${type === 'error' ? 'error' : ''}`;
     toast.textContent = message;
-    document.getElementById('toastRegion').appendChild(toast);
+    region.appendChild(toast);
     window.setTimeout(() => toast.remove(), 3600);
   }
 
@@ -84,8 +102,9 @@
       admit.textContent = '✓ Admit';
       admit.addEventListener('click', () => runAction(async () => {
         await emitAck('admit-participant', { code: roomCode, participantId: participant.id });
-        activateTab(document.getElementById('tab-live'), false);
-        showToast(`${participant.name} was admitted and moved to Live class.`);
+        const videoTab = byId('tab-live');
+        if (videoTab) activateTab(videoTab, false);
+        showToast(`${participant.name} was admitted and moved to the video room.`);
       }));
       actions.appendChild(admit);
     }
@@ -109,28 +128,34 @@
     state.participants = [...mainRoom, ...videoRoom];
 
     const total = mainRoom.length + videoRoom.length;
-    document.getElementById('totalCount').textContent = String(total);
-    document.getElementById('liveCount').textContent = String(videoRoom.length);
-    document.getElementById('waitingCount').textContent = String(mainRoom.length);
-    document.getElementById('lobbyTabCount').textContent = String(mainRoom.length);
-    document.getElementById('liveTabCount').textContent = String(videoRoom.length);
-    document.getElementById('waitingSummary').textContent = mainRoom.length + ' in the normal room';
-    document.getElementById('liveSummary').textContent = videoRoom.length + ' in the video room';
-    document.getElementById('liveSideCount').textContent = videoRoom.length + ' student' + (videoRoom.length === 1 ? '' : 's');
+    setText('totalCount', String(total));
+    setText('liveCount', String(videoRoom.length));
+    setText('waitingCount', String(mainRoom.length));
+    setText('lobbyTabCount', String(mainRoom.length));
+    setText('liveTabCount', String(videoRoom.length));
+    setText('waitingSummary', mainRoom.length + ' in the normal room');
+    setText('liveSummary', videoRoom.length + ' in the video room');
+    setText('liveSideCount', videoRoom.length + ' student' + (videoRoom.length === 1 ? '' : 's'));
 
-    lobbyList.replaceChildren();
-    liveList.replaceChildren();
-    if (!mainRoom.length) lobbyList.appendChild(emptyState('No one is in the normal room yet.'));
-    document.getElementById('liveEmpty').hidden = videoRoom.length > 0;
-    document.getElementById('liveVideoPlaceholder').classList.toggle('hidden', videoRoom.length > 0);
-    document.getElementById('livePreviewEmpty').innerHTML = videoRoom.length
-      ? '<span class="manager-preview-icon"><i class="icon-user-round" aria-hidden="true"></i></span><p><strong>' + videoRoom.length + ' student' + (videoRoom.length === 1 ? '' : 's') + ' in video</strong>They will appear here when they join video.</p>'
-      : '<span class="manager-preview-icon"><i class="icon-video" aria-hidden="true"></i></span><p><strong>No one admitted yet</strong>Students you admit appear here automatically.</p>';
-    mainRoom.forEach((participant) => lobbyList.appendChild(participantCard(participant, false)));
-    videoRoom.forEach((participant) => liveList.appendChild(participantCard(participant, true)));
+    lobbyList?.replaceChildren();
+    liveList?.replaceChildren();
+    if (!mainRoom.length && lobbyList) lobbyList.appendChild(emptyState('No one is in the normal room yet.'));
+    const liveEmpty = byId('liveEmpty');
+    if (liveEmpty) liveEmpty.hidden = videoRoom.length > 0;
+    const videoPlaceholder = byId('liveVideoPlaceholder');
+    if (videoPlaceholder) videoPlaceholder.classList.toggle('hidden', videoRoom.length > 0);
+    const preview = byId('livePreviewEmpty');
+    if (preview) {
+      preview.innerHTML = videoRoom.length
+        ? '<span class="manager-preview-icon"><i class="icon-user-round" aria-hidden="true"></i></span><p><strong>' + videoRoom.length + ' student' + (videoRoom.length === 1 ? '' : 's') + ' in video</strong>They will appear here when they join video.</p>'
+        : '<span class="manager-preview-icon"><i class="icon-video" aria-hidden="true"></i></span><p><strong>No one admitted yet</strong>Students you admit appear here automatically.</p>';
+    }
+    mainRoom.forEach((participant) => lobbyList?.appendChild(participantCard(participant, false)));
+    videoRoom.forEach((participant) => liveList?.appendChild(participantCard(participant, true)));
     attachVideoTileControls();
 
-    const recipient = document.getElementById('chatRecipient');
+    const recipient = byId('chatRecipient');
+    if (!recipient) return;
     const selected = recipient.value;
     recipient.replaceChildren(new Option('Everyone in class', ''));
     state.participants.forEach((participant) => {
@@ -155,11 +180,13 @@
 
   function openKickDialog(participant) {
     state.pendingKick = participant;
-    document.getElementById('kickTargetLabel').textContent = `Remove ${participant.name} from this classroom?`;
-    document.getElementById('kickReason').value = '';
-    document.getElementById('kickError').textContent = '';
+    if (!kickDialog) return;
+    setText('kickTargetLabel', `Remove ${participant.name} from this classroom?`);
+    const reason = byId('kickReason');
+    if (reason) reason.value = '';
+    setText('kickError', '');
     kickDialog.showModal();
-    document.getElementById('kickReason').focus();
+    reason?.focus();
   }
 
   function muteParticipant(participant) {
@@ -217,8 +244,9 @@
     body.textContent = item.message;
     metadata.append(sender, time);
     message.append(metadata, body);
-    const messages = document.getElementById('chatMessages');
-    document.getElementById('chatEmpty')?.remove();
+    const messages = byId('chatMessages');
+    if (!messages) return;
+    byId('chatEmpty')?.remove();
     messages.appendChild(message);
     messages.scrollTop = messages.scrollHeight;
   }
@@ -231,9 +259,10 @@
     try {
       const response = await emitAck('host-join', { code: roomCode, token: teacherToken });
       state.authenticated = true;
-      document.getElementById('roomLabel').textContent = `Room ${roomCode} · Host connected`;
-      document.getElementById('managerBackLink').href = `/teacher.html?room=${encodeURIComponent(roomCode)}#token=${encodeURIComponent(teacherToken)}`;
-      renderParticipants(response.participants || []);
+      setText('roomLabel', `Room ${roomCode} · Host connected`);
+      const backLink = byId('managerBackLink');
+      if (backLink) backLink.href = `/teacher.html?room=${encodeURIComponent(roomCode)}#token=${encodeURIComponent(teacherToken)}`;
+      renderParticipants(response.participants || {});
       await emitAck('request-participant-list', { code: roomCode });
     } catch (error) {
       showError(error.message);
@@ -243,14 +272,17 @@
   const managerTabs = [...document.querySelectorAll('.manager-tab')];
 
   function startManagerVideo() {
-    document.getElementById('videoRoom').classList.remove('hidden');
-    document.getElementById('videoConnectionStatus').textContent = 'Connecting…';
-    if (!window.ClassroomVideo) return;
+    const overlay = byId('videoRoom');
+    if (overlay) overlay.classList.remove('hidden');
+    setText('videoConnectionStatus', 'Connecting…');
+    // The teacher dashboard already owns its own video room and start button,
+    // so embedded we must not start a second LiveKit connection here.
+    if (!window.ClassroomVideo || hostConfig) return;
     window.ClassroomVideo.start().then(() => {
-      document.getElementById('liveVideoPlaceholder').classList.add('hidden');
+      byId('liveVideoPlaceholder')?.classList.add('hidden');
     }).catch((error) => {
-      document.getElementById('videoConnectionStatus').textContent = 'Unavailable';
-      document.getElementById('liveVideoPlaceholder').classList.remove('hidden');
+      setText('videoConnectionStatus', 'Unavailable');
+      byId('liveVideoPlaceholder')?.classList.remove('hidden');
       showToast(error.message || 'Video could not be started.', 'error');
     });
   }
@@ -265,7 +297,7 @@
     document.querySelectorAll('.manager-channel').forEach((channel) => {
       channel.classList.toggle('active', channel.id === `channel-${tab.dataset.channel}`);
     });
-    if (tab.dataset.channel === 'live' && connectVideo) startManagerVideo();
+    if (tab.dataset.channel === 'live' && connectVideo && !hostConfig) startManagerVideo();
   }
 
   managerTabs.forEach((tab, index) => {
@@ -284,27 +316,35 @@
   });
 
   window.addEventListener('classroom-video-ready', () => {
-    if (document.getElementById('channel-live').classList.contains('active')) startManagerVideo();
+    if (hostConfig) return;
+    if (byId('channel-live')?.classList.contains('active')) startManagerVideo();
   });
 
-  const videoGridObserver = new MutationObserver(attachVideoTileControls);
-  videoGridObserver.observe(document.getElementById('videoGrid'), { childList: true });
+  const videoGrid = byId('videoGrid');
+  if (videoGrid) {
+    // Overlays Mute/Kick onto live LiveKit tiles wherever the video grid lives.
+    new MutationObserver(attachVideoTileControls).observe(videoGrid, { childList: true });
+  }
 
-  document.getElementById('videoRoomBtn').addEventListener('click', startManagerVideo);
-  document.getElementById('stageConnect').addEventListener('click', startManagerVideo);
-  document.getElementById('closeKickDialog').addEventListener('click', () => kickDialog.close());
-  document.getElementById('cancelKickBtn').addEventListener('click', () => kickDialog.close());
-  document.getElementById('kickForm').addEventListener('submit', (event) => {
+  // Only the standalone page owns these buttons; the teacher dashboard wires
+  // its own video controls.
+  if (!hostConfig) {
+    byId('videoRoomBtn')?.addEventListener('click', startManagerVideo);
+    byId('stageConnect')?.addEventListener('click', startManagerVideo);
+  }
+  byId('closeKickDialog')?.addEventListener('click', () => kickDialog?.close());
+  byId('cancelKickBtn')?.addEventListener('click', () => kickDialog?.close());
+  byId('kickForm')?.addEventListener('submit', (event) => {
     event.preventDefault();
     const participant = state.pendingKick;
-      const reason = document.getElementById('kickReason').value.trim();
-      if (!participant) return;
-      if (reason.length < 3) {
-        document.getElementById('kickError').textContent = 'Enter a reason of at least 3 characters.';
-        document.getElementById('kickReason').focus();
-        return;
-      }
-      kickDialog.close();
+    const reason = byId('kickReason')?.value.trim() || '';
+    if (!participant) return;
+    if (reason.length < 3) {
+      setText('kickError', 'Enter a reason of at least 3 characters.');
+      byId('kickReason').focus();
+      return;
+    }
+    kickDialog?.close();
     runAction(async () => {
       await emitAck('kick-participant', { code: roomCode, participantId: participant.id, reason });
       showToast(`${participant.name} was removed from the classroom.`);
@@ -312,12 +352,12 @@
     });
   });
 
-  document.getElementById('chatForm').addEventListener('submit', (event) => {
+  byId('chatForm')?.addEventListener('submit', (event) => {
     event.preventDefault();
-    const input = document.getElementById('chatInput');
+    const input = byId('chatInput');
     const message = input.value.trim();
     if (!message || !state.authenticated) return;
-    const recipientId = document.getElementById('chatRecipient').value;
+    const recipientId = byId('chatRecipient').value;
     const eventName = recipientId ? 'private-chat-message' : 'classroom-message';
     const payload = recipientId
       ? { code: roomCode, participantId: recipientId, message }

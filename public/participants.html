@@ -71,13 +71,19 @@
           <section class="manager-video-stage" aria-label="LiveKit classroom video">
             <div class="manager-video-title"><h3>Class video</h3><span id="videoConnectionStatus" class="badge">Not connected</span><span id="videoPeerCount" class="badge">0 participants</span></div>
             <div id="videoRoom" class="video-room manager-video-room hidden">
-              <div id="videoGrid" class="video-grid"><div class="video-waiting"><h3>Connect to see the classroom</h3></div></div>
+              <div class="video-grid" id="videoGrid"><div class="video-waiting"><h3>Connect to see the classroom</h3></div></div>
               <div class="video-controls">
                 <button id="toggleMicBtn" class="ctrl-btn" disabled>🎙️ <span>Mic off</span></button>
                 <button id="toggleCamBtn" class="ctrl-btn" disabled>📷 <span>Camera off</span></button>
                 <button id="shareScreenBtn" class="ctrl-btn" disabled>🖥️ <span>Share screen</span></button>
+                <button id="videoChatToggle" class="ctrl-btn" type="button" aria-expanded="false" aria-controls="videoChatPanel">💬 <span>Chat</span></button>
                 <button id="leaveVideoBtn" class="ctrl-btn end" disabled>Leave video</button>
               </div>
+              <section id="videoChatPanel" class="video-chat-panel hidden" aria-label="Class chat">
+                <div class="video-chat-head"><strong>Class chat</strong><button id="videoChatClose" class="video-chat-close" type="button" aria-label="Close chat">&times;</button></div>
+                <div id="videoChatMessages" class="video-chat-messages" role="log" aria-live="polite"></div>
+                <form id="videoChatForm" class="video-chat-input"><label class="sr-only" for="videoChatText">Message the class</label><input id="videoChatText" maxlength="1000" placeholder="Message everyone…" autocomplete="off" required /><button class="primary" type="submit">Send</button></form>
+              </section>
             </div>
             <div id="liveVideoPlaceholder" class="manager-video-placeholder"><span class="manager-preview-icon"><i class="icon-video" aria-hidden="true"></i></span><p><strong>Video room is ready</strong>Connect to LiveKit to see the teacher and students who join on camera.</p></div>
             <div class="manager-video-actions"><button id="stageConnect" class="action-button" type="button">Connect</button></div>

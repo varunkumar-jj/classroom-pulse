@@ -180,12 +180,31 @@ Edits to existing files:
   single-use admission tickets, mute/unmute, kick with reason, and the new
   static pages.
 
+### Where the controls live
+
+The Participants manager is a **tab on the teacher dashboard**, between
+Classroom and AI Quiz, so it needs no separate page load. The standalone
+`/participants.html` URL still works for sharing a direct link.
+
+`participants.js` is written to run in both places. When
+`window.ParticipantsManagerConfig` is present it reuses the host page's socket,
+room code, and teacher token instead of opening a second connection, and it
+leaves `window.classroomVideoConfig` and the video start buttons to the host
+page. Every element it touches is looked up defensively, because the embedded
+tab intentionally omits the video stage: the teacher dashboard already owns
+`#videoRoom` and `#videoGrid`, and duplicating those ids would break the video.
+
+Class chat is available in three places at once — the Participants tab, the
+student page, and a **chat panel inside the video room** on both teacher and
+student pages. All of them reuse the same `classroom-message` and
+`private-chat-message` events, so there is one conversation rather than three.
+
 ### Checks
 
 ```sh
 npm test          # static DOM/icon audit, then the full integration smoke test
 npm run test:audit
-npm run test:demo  # live lobby -> admit -> mute -> kick run
+npm run test:demo  # live normal room -> admit -> mute -> kick run
 ```
 
 ## Deploy the Node app

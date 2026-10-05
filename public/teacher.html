@@ -44,6 +44,7 @@
             <span id="videoPeerCount" class="badge">1 participant</span>
             <span id="videoConnectionStatus" class="badge">Connecting</span>
           </div>
+          <button id="videoChatToggle" class="ctrl-btn" type="button" aria-expanded="false" aria-controls="videoChatPanel">💬 <span>Chat</span></button>
           <button id="leaveVideoBtn" class="ctrl-btn end" disabled>📵 <span>Leave</span></button>
         </div>
         <div class="video-grid" id="videoGrid">
@@ -53,6 +54,11 @@
             <p>Students can click "Join Video" on their screen once you launch the room.</p>
           </div>
         </div>
+        <section id="videoChatPanel" class="video-chat-panel hidden" aria-label="Class chat">
+          <div class="video-chat-head"><strong>Class chat</strong><button id="videoChatClose" class="video-chat-close" type="button" aria-label="Close chat">&times;</button></div>
+          <div id="videoChatMessages" class="video-chat-messages" role="log" aria-live="polite"></div>
+          <form id="videoChatForm" class="video-chat-input"><label class="sr-only" for="videoChatText">Message the class</label><input id="videoChatText" maxlength="1000" placeholder="Message everyone…" autocomplete="off" required /><button class="primary" type="submit">Send</button></form>
+        </section>
         <div class="video-controls">
           <button id="toggleMicBtn" class="ctrl-btn" disabled>🎙️ <span>Mic On</span></button>
           <button id="toggleCamBtn" class="ctrl-btn" disabled>📷 <span>Camera On</span></button>
@@ -70,6 +76,7 @@
 
       <nav class="teacher-nav" role="tablist" aria-label="Teacher dashboard sections">
         <button class="tab-btn active" data-tab="classroom" id="tabClassroom" role="tab" aria-selected="true" aria-controls="panel-classroom" tabindex="0" type="button">Classroom</button>
+        <button class="tab-btn" data-tab="participants" id="tabParticipants" role="tab" aria-selected="false" aria-controls="panel-participants" tabindex="-1" type="button">Participants</button>
         <button class="tab-btn" data-tab="quiz" id="tabQuiz" role="tab" aria-selected="false" aria-controls="panel-quiz" tabindex="-1" type="button">AI Quiz</button>
         <button class="tab-btn" data-tab="questions" id="tabQuestions" role="tab" aria-selected="false" aria-controls="panel-questions" tabindex="-1" type="button">Questions</button>
         <button class="tab-btn" data-tab="events" id="tabEvents" role="tab" aria-selected="false" aria-controls="panel-events" tabindex="-1" type="button">Events</button>
@@ -139,7 +146,69 @@
         <div class="teacher-bottom-panels">
           <section class="teacher-list-panel" aria-labelledby="teacherQuestionsTitle"><div class="row"><h2 id="teacherQuestionsTitle">Student questions</h2><a class="muted-link" href="#panel-questions" data-open-teacher-tab="questions">Open Questions</a></div><ul id="questionsPreview" class="list"><li class="small">No student questions yet.</li></ul></section>
           <section class="teacher-list-panel" aria-labelledby="teacherEventsTitle"><div class="row"><h2 id="teacherEventsTitle">Events &amp; history</h2><a class="muted-link" href="#panel-events" data-open-teacher-tab="events">Open Events</a></div><ul id="eventsPreview" class="list"><li class="small">No events yet.</li></ul></section>
+          <section class="teacher-list-panel" aria-labelledby="teacherPeopleTitle"><div class="row"><h2 id="teacherPeopleTitle">Participants</h2><a class="muted-link" href="#panel-participants" data-open-teacher-tab="participants">Manage rooms</a></div><ul class="list"><li class="small">Admit, mute, or remove students from the normal room and video room.</li></ul></section>
         </div>
+      </section>
+
+      <!-- TAB: Participants (embedded Participants Manager) -->
+      <section class="tab-panel" id="panel-participants" role="tabpanel" aria-labelledby="tabParticipants" tabindex="0">
+        <div class="manager-embed">
+          <div class="manager-embed-head">
+            <div>
+              <h2>Participants</h2>
+              <p id="roomLabel" class="manager-subtitle">Connecting to your classroom…</p>
+            </div>
+            <div class="manager-stats" aria-live="polite">
+              <div class="manager-stat"><strong id="totalCount">0</strong><span>Total</span></div>
+              <div class="manager-stat waiting-stat"><strong id="waitingCount">0</strong><span>Normal room</span></div>
+              <div class="manager-stat"><strong id="liveCount">0</strong><span>Video room</span></div>
+            </div>
+          </div>
+
+          <nav class="manager-tabs" role="tablist" aria-label="Classroom rooms">
+            <button id="tab-lobby" class="manager-tab active" type="button" role="tab" aria-selected="true" aria-controls="channel-lobby" tabindex="0" data-channel="lobby"><i class="icon-users-round" aria-hidden="true"></i>Normal room <span id="lobbyTabCount">0</span></button>
+            <button id="tab-live" class="manager-tab" type="button" role="tab" aria-selected="false" aria-controls="channel-live" tabindex="-1" data-channel="live"><i class="icon-video" aria-hidden="true"></i>Video room <span id="liveTabCount">0</span></button>
+            <button id="tab-chat" class="manager-tab" type="button" role="tab" aria-selected="false" aria-controls="channel-chat" tabindex="-1" data-channel="chat"><i class="icon-message-circle" aria-hidden="true"></i>Chat</button>
+          </nav>
+
+          <section class="manager-channel active" id="channel-lobby" role="tabpanel" aria-labelledby="tab-lobby" tabindex="0">
+            <div class="channel-heading">
+              <div><h2>Normal room</h2><p>Everyone who joins appears here automatically — no approval needed.</p></div>
+              <span id="waitingSummary" class="channel-description">0 in the normal room</span>
+            </div>
+            <div id="lobbyList" class="participant-list" aria-live="polite"></div>
+            <p id="managerError" class="manager-error hidden" role="alert"></p>
+          </section>
+
+          <section class="manager-channel" id="channel-live" role="tabpanel" aria-labelledby="tab-live" tabindex="0">
+            <div class="channel-heading">
+              <div><h2>Video room</h2><p>Mute is reversible. Removal requires a reason.</p></div>
+              <span id="liveSummary" class="channel-description">0 in the video room</span>
+            </div>
+            <div id="liveList" class="participant-list live-participant-list" aria-live="polite"></div>
+            <p id="liveEmpty" class="empty-state">No students in the video room yet. Admit someone from the normal room to see them here.</p>
+            <p class="manager-flow-note"><span aria-hidden="true">↗</span><span>Start the video room from the <strong>Classroom</strong> tab; admitted students appear there automatically.</span></p>
+          </section>
+
+          <section class="manager-channel" id="channel-chat" role="tabpanel" aria-labelledby="tab-chat" tabindex="0">
+            <div class="channel-heading">
+              <div><h2>Chat</h2><p>Send a message to the class or directly to a participant.</p></div>
+            </div>
+            <div class="chat-card">
+              <div id="chatMessages" class="chat-messages" role="log" aria-live="polite"><div id="chatEmpty" class="manager-chat-empty"><i class="icon-message-square" aria-hidden="true"></i><strong>No messages yet</strong><span>Your class messages will appear here.</span></div></div>
+              <form id="chatForm" class="chat-form"><label class="sr-only" for="chatRecipient">Message recipient</label><select id="chatRecipient"><option value="">Everyone in class</option></select><label class="sr-only" for="chatInput">Message</label><input id="chatInput" maxlength="1000" placeholder="Write a message…" autocomplete="off" required /><button class="primary" type="submit">Send message</button></form>
+            </div>
+          </section>
+        </div>
+
+        <dialog id="kickDialog" class="kick-dialog" aria-labelledby="kickTitle">
+          <form id="kickForm" method="dialog">
+            <div class="kick-dialog-heading"><div><h2 id="kickTitle">Remove participant?</h2><p id="kickTargetLabel" class="manager-subtitle"></p><p>They will leave this classroom and will not be able to rejoin. Add a short reason so the decision is clear.</p></div><button type="button" class="kick-dialog-close" id="closeKickDialog" aria-label="Close dialog"><i class="icon-x" aria-hidden="true"></i></button></div>
+            <label for="kickReason">Reason for removal</label><textarea id="kickReason" minlength="3" maxlength="300" required placeholder="Write a brief reason"></textarea><p id="kickError" class="kick-form-error" aria-live="polite"></p>
+            <div class="dialog-actions"><button type="button" id="cancelKickBtn">Cancel</button><button class="danger-button" type="submit">Remove participant</button></div>
+          </form>
+        </dialog>
+        <div id="toastRegion" class="toast-region" aria-live="polite" aria-atomic="true"></div>
       </section>
 
       <!-- TAB: AI Quiz -->
@@ -222,6 +291,12 @@
       const roomCode = (params.get('room') || '').toUpperCase();
       const token = new URLSearchParams(window.location.hash.slice(1)).get('token') || params.get('token') || '';
       const socket = io();
+
+      // Hand the teacher page's existing connection to participants.js so the
+      // embedded Participants tab reuses this socket instead of opening a
+      // second one, and leaves the video globals owned by this page.
+      window.ParticipantsManagerConfig = { socket, roomCode, token };
+      window.classroomSocket = socket;
 
       const roomCodeBadge = document.getElementById('roomCodeBadge');
       const studentCount = document.getElementById('studentCount');
@@ -853,6 +928,7 @@
       };
 
     </script>
+    <script src="/participants.js" defer></script>
     <script type="module" src="/video-room.js"></script>
   </body>
 </html>

@@ -82,6 +82,7 @@
             <span id="videoPeerCount" class="badge">1 participant</span>
             <span id="videoConnectionStatus" class="badge">Connecting</span>
           </div>
+          <button id="videoChatToggle" class="ctrl-btn" type="button" aria-expanded="false" aria-controls="videoChatPanel">💬 <span>Chat</span></button>
           <button id="leaveVideoBtn" class="ctrl-btn end">📵 <span>Leave</span></button>
         </div>
         <div class="video-grid" id="videoGrid">
@@ -90,6 +91,11 @@
             <h3>Connecting to video room...</h3>
           </div>
         </div>
+        <section id="videoChatPanel" class="video-chat-panel hidden" aria-label="Class chat">
+          <div class="video-chat-head"><strong>Class chat</strong><button id="videoChatClose" class="video-chat-close" type="button" aria-label="Close chat">&times;</button></div>
+          <div id="videoChatMessages" class="video-chat-messages" role="log" aria-live="polite"></div>
+          <form id="videoChatForm" class="video-chat-input"><label class="sr-only" for="videoChatText">Message the class</label><input id="videoChatText" maxlength="1000" placeholder="Message everyone…" autocomplete="off" required /><button class="primary" type="submit">Send</button></form>
+        </section>
         <div class="video-controls">
           <button id="toggleMicBtn" class="ctrl-btn" disabled>🎙️ <span>Mic On</span></button>
           <button id="toggleCamBtn" class="ctrl-btn" disabled>📷 <span>Camera On</span></button>
