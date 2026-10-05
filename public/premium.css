@@ -720,3 +720,23 @@ label input, label textarea { margin-top: 8px; }
 .teacher-quiz-layout .upload-zone:focus-within { outline: 2px solid var(--cp-primary); outline-offset: 3px; }
 .teacher-header-actions > .teacher-desktop-action { min-height: 40px; font-size: 13px; }
 .teacher-header-actions > .teacher-tools-menu { display: none; }
+
+/* ======== BRAND LOGO ======== */
+/* The SVG carries its own gradient tile, so the old coloured square behind the
+   glyph would show as a frame. Drop the tile styling wherever the logo image
+   is present. */
+.brand-mark:has(img),
+.manager-brand-mark:has(img) {
+  width: 34px;
+  height: 34px;
+  background: none;
+  box-shadow: none;
+}
+
+.brand-mark img,
+.manager-brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
