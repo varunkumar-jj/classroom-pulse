@@ -100,40 +100,44 @@
     return card;
   }
 
-  function renderParticipants(participants) {
-    state.participants = participants.filter((participant) => participant.role === 'PARTICIPANT');
-    const waiting = state.participants.filter((participant) => participant.status === 'WAITING');
-    const live = state.participants.filter((participant) => ['ADMITTED', 'MUTED'].includes(participant.status));
-    document.getElementById('totalCount').textContent = String(state.participants.length);
-    document.getElementById('liveCount').textContent = String(live.length);
-    document.getElementById('waitingCount').textContent = String(waiting.length);
-    document.getElementById('lobbyTabCount').textContent = String(waiting.length);
-    document.getElementById('liveTabCount').textContent = String(live.length);
-    document.getElementById('waitingSummary').textContent = `${waiting.length} waiting`;
-    document.getElementById('liveSummary').textContent = `${live.length} admitted`;
-    document.getElementById('liveSideCount').textContent = `${live.length} student${live.length === 1 ? '' : 's'}`;
+  function renderParticipants(payload) {
+    // The server sends two independent lists; never merge them, or a student
+    // would appear in both the normal room and the video room at once.
+    const rooms = payload || {};
+    const mainRoom = (rooms.mainRoom || []).filter((participant) => participant.role === 'PARTICIPANT');
+    const videoRoom = (rooms.videoRoom || []).filter((participant) => participant.role === 'PARTICIPANT');
+    state.participants = [...mainRoom, ...videoRoom];
+
+    const total = mainRoom.length + videoRoom.length;
+    document.getElementById('totalCount').textContent = String(total);
+    document.getElementById('liveCount').textContent = String(videoRoom.length);
+    document.getElementById('waitingCount').textContent = String(mainRoom.length);
+    document.getElementById('lobbyTabCount').textContent = String(mainRoom.length);
+    document.getElementById('liveTabCount').textContent = String(videoRoom.length);
+    document.getElementById('waitingSummary').textContent = mainRoom.length + ' in the normal room';
+    document.getElementById('liveSummary').textContent = videoRoom.length + ' in the video room';
+    document.getElementById('liveSideCount').textContent = videoRoom.length + ' student' + (videoRoom.length === 1 ? '' : 's');
 
     lobbyList.replaceChildren();
     liveList.replaceChildren();
-    if (!waiting.length) lobbyList.appendChild(emptyState('No one is waiting right now.'));
-    document.getElementById('liveEmpty').hidden = live.length > 0;
-    document.getElementById('liveVideoPlaceholder').classList.toggle('hidden', live.length > 0);
-    document.getElementById('livePreviewEmpty').innerHTML = live.length
-      ? `<span class="manager-preview-icon"><i class="icon-user-round" aria-hidden="true"></i></span><p><strong>${live.length} student${live.length === 1 ? '' : 's'} admitted</strong>They’ll appear here when they join video.</p>`
+    if (!mainRoom.length) lobbyList.appendChild(emptyState('No one is in the normal room yet.'));
+    document.getElementById('liveEmpty').hidden = videoRoom.length > 0;
+    document.getElementById('liveVideoPlaceholder').classList.toggle('hidden', videoRoom.length > 0);
+    document.getElementById('livePreviewEmpty').innerHTML = videoRoom.length
+      ? '<span class="manager-preview-icon"><i class="icon-user-round" aria-hidden="true"></i></span><p><strong>' + videoRoom.length + ' student' + (videoRoom.length === 1 ? '' : 's') + ' in video</strong>They will appear here when they join video.</p>'
       : '<span class="manager-preview-icon"><i class="icon-video" aria-hidden="true"></i></span><p><strong>No one admitted yet</strong>Students you admit appear here automatically.</p>';
-    waiting.forEach((participant) => lobbyList.appendChild(participantCard(participant, false)));
-    live.forEach((participant) => liveList.appendChild(participantCard(participant, true)));
+    mainRoom.forEach((participant) => lobbyList.appendChild(participantCard(participant, false)));
+    videoRoom.forEach((participant) => liveList.appendChild(participantCard(participant, true)));
     attachVideoTileControls();
 
     const recipient = document.getElementById('chatRecipient');
     const selected = recipient.value;
     recipient.replaceChildren(new Option('Everyone in class', ''));
-    live.forEach((participant) => {
+    state.participants.forEach((participant) => {
       recipient.add(new Option(participant.name, participant.id));
     });
-    if (live.some((participant) => participant.id === selected)) recipient.value = selected;
+    if (state.participants.some((participant) => participant.id === selected)) recipient.value = selected;
   }
-
   function emptyState(message) {
     const empty = document.createElement('p');
     empty.className = 'empty-state';

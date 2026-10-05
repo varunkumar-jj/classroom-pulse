@@ -26,14 +26,14 @@
         </header>
 
         <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
-      <section id="waitingApproval" class="approval-overlay hidden" role="status" aria-live="polite">
-        <div class="approval-card">
-          <span class="approval-spinner" aria-hidden="true"></span>
-          <p class="eyebrow">CLASSROOM LOBBY</p>
-          <h1>You're in the waiting room</h1>
-          <p>Waiting for your teacher to admit you. You can keep this page open.</p>
-          <span id="approvalRoomLabel" class="badge">Waiting for approval</span>
+      <section id="waitingApproval" class="video-request hidden" role="status" aria-live="polite">
+        <div class="video-request-body">
+          <p class="eyebrow">CLASS VIDEO</p>
+          <h2 id="videoRequestTitle">Join the video room</h2>
+          <p id="videoRequestCopy">You're in the normal room and can take part straight away. The video room needs your teacher's approval.</p>
+          <span id="approvalRoomLabel" class="badge">In the normal room</span>
         </div>
+        <button id="requestVideoBtn" class="primary" type="button">Request to join video</button>
       </section>
       <section id="kickedOverlay" class="approval-overlay hidden" role="alertdialog" aria-modal="true" aria-labelledby="kickedTitle">
         <div class="approval-card">
@@ -230,12 +230,18 @@
             document.getElementById('studentTopicRoom').textContent = 'Room ' + code;
             document.getElementById('studentFooterRoom').textContent = code;
             votePanel.classList.remove('hidden');
-            if (lobbyResponse.status === 'WAITING') {
-              studentChatCard.classList.add('hidden');
-              document.getElementById('approvalRoomLabel').textContent = 'Room ' + code + ' • Waiting for approval';
+            if (lobbyResponse.status === 'MAIN') {
+              // Straight into the normal room: voting, questions and chat all
+              // work now. Only the video room still needs teacher approval.
+              studentChatCard.classList.remove('hidden');
+              document.getElementById('approvalRoomLabel').textContent = 'Room ' + code + ' • In the normal room';
+              document.getElementById('videoRequestTitle').textContent = 'Join the video room';
+              document.getElementById('videoRequestCopy').textContent = 'You are in the normal room and can take part straight away. The video room needs your teacher\'s approval.';
+              document.getElementById('requestVideoBtn').disabled = false;
+              document.getElementById('requestVideoBtn').textContent = 'Request to join video';
               document.getElementById('waitingApproval').classList.remove('hidden');
               joinVideoBtn.classList.add('hidden');
-              statusBanner.classList.add('hidden');
+              showStatus('You joined the normal room.', 'success');
             } else if (lobbyResponse.admissionTicket) {
               enterVideoRoom(lobbyResponse.admissionTicket);
             }
@@ -261,6 +267,24 @@
 
       socket.on('participant-admitted', function (result) {
         if (result) enterVideoRoom(result.admissionTicket);
+      });
+
+      document.getElementById('requestVideoBtn').addEventListener('click', function () {
+        if (!joined || kicked) return;
+        socket.emit('request-video-access', {}, function (response) {
+          if (!response || !response.ok) {
+            showStatus(response?.err || 'Could not request the video room.', 'error');
+            return;
+          }
+          // Requesting never grants access; the teacher still has to admit.
+          const button = document.getElementById('requestVideoBtn');
+          button.disabled = true;
+          button.textContent = 'Request sent';
+          document.getElementById('videoRequestTitle').textContent = 'Waiting for your teacher';
+          document.getElementById('videoRequestCopy').textContent = 'Your request is with your teacher. Keep taking part in the normal room while you wait.';
+          document.getElementById('approvalRoomLabel').textContent = 'Requested • awaiting approval';
+          showStatus('Requested access to the video room.', 'info');
+        });
       });
 
       socket.on('participant-kicked', function (result) {

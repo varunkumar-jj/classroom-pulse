@@ -23,14 +23,14 @@
         </div>
         <div class="manager-stats" aria-live="polite">
           <div class="manager-stat"><strong id="totalCount">0</strong><span>Total participants</span></div>
-          <div class="manager-stat waiting-stat"><strong id="waitingCount">0</strong><span>Waiting</span></div>
-          <div class="manager-stat"><strong id="liveCount">0</strong><span>In live class</span></div>
+          <div class="manager-stat waiting-stat"><strong id="waitingCount">0</strong><span>In normal room</span></div>
+          <div class="manager-stat"><strong id="liveCount">0</strong><span>In video room</span></div>
         </div>
       </header>
 
       <nav class="manager-tabs" role="tablist" aria-label="Classroom channels">
-        <button id="tab-lobby" class="manager-tab active" type="button" role="tab" aria-selected="true" aria-controls="channel-lobby" tabindex="0" data-channel="lobby"><i class="icon-users-round" aria-hidden="true"></i>Lobby <span id="lobbyTabCount">0</span></button>
-        <button id="tab-live" class="manager-tab" type="button" role="tab" aria-selected="false" aria-controls="channel-live" tabindex="-1" data-channel="live"><i class="icon-video" aria-hidden="true"></i>Live class <span id="liveTabCount">0</span></button>
+        <button id="tab-lobby" class="manager-tab active" type="button" role="tab" aria-selected="true" aria-controls="channel-lobby" tabindex="0" data-channel="lobby"><i class="icon-users-round" aria-hidden="true"></i>Normal room <span id="lobbyTabCount">0</span></button>
+        <button id="tab-live" class="manager-tab" type="button" role="tab" aria-selected="false" aria-controls="channel-live" tabindex="-1" data-channel="live"><i class="icon-video" aria-hidden="true"></i>Video room <span id="liveTabCount">0</span></button>
         <button id="tab-chat" class="manager-tab" type="button" role="tab" aria-selected="false" aria-controls="channel-chat" tabindex="-1" data-channel="chat"><i class="icon-message-circle" aria-hidden="true"></i>Chat</button>
       </nav>
       <p class="manager-sync-note"><span class="manager-sync-dot" aria-hidden="true"></span>Live updates on · Admission and room changes appear as they happen.</p>
@@ -39,17 +39,17 @@
         <div class="manager-lobby-layout">
           <section class="manager-lobby-main" aria-labelledby="waitingTitle">
             <div class="channel-heading">
-              <div><h2 id="waitingTitle">Waiting for approval</h2><p>Admit students, or remove someone from the room.</p></div>
-              <span class="channel-description"><i class="manager-state-dot" aria-hidden="true"></i><span id="waitingSummary">0 waiting</span></span>
+              <div><h2 id="waitingTitle">Normal room</h2><p>Everyone who joins appears here automatically — no approval needed.</p></div>
+              <span class="channel-description"><i class="manager-state-dot" aria-hidden="true"></i><span id="waitingSummary">0 in the normal room</span></span>
             </div>
             <div class="manager-list-head" aria-hidden="true"><span>Student</span><span>Arrived</span><span>Action</span></div>
             <div id="lobbyList" class="participant-list" aria-live="polite"></div>
-            <div class="manager-flow-note"><span aria-hidden="true">↗</span><span>When you admit a student, they move to <strong>Live class</strong> and can join the video room.</span></div>
+            <div class="manager-flow-note"><span aria-hidden="true">↗</span><span>Admit a student to move them into the <strong>Video room</strong>. Each room keeps its own list.</span></div>
           </section>
 
           <aside class="manager-side" aria-label="Live class status">
             <section class="manager-side-section">
-              <div class="manager-side-heading"><h2>Live class</h2><span id="liveSideCount">0 students</span></div>
+              <div class="manager-side-heading"><h2>Video room</h2><span id="liveSideCount">0 students</span></div>
               <div class="manager-live-preview" id="livePreviewEmpty"><span class="manager-preview-icon"><i class="icon-video" aria-hidden="true"></i></span><p><strong>No one admitted yet</strong>Students you admit appear here automatically.</p></div>
               <button id="videoRoomBtn" class="action-button manager-video-connect" type="button">Connect to class video</button>
             </section>
@@ -64,9 +64,9 @@
       <section class="manager-channel" id="channel-live" role="tabpanel" aria-labelledby="tab-live" tabindex="0">
         <div class="manager-live-layout">
           <section aria-labelledby="liveListTitle">
-            <div class="channel-heading"><div><h2 id="liveListTitle">In live class</h2><p>Mute is reversible. Removal requires a reason.</p></div><span id="liveSummary" class="channel-description">0 admitted</span></div>
+            <div class="channel-heading"><div><h2 id="liveListTitle">Video room</h2><p>Mute is reversible. Removal requires a reason.</p></div><span id="liveSummary" class="channel-description">0 in the video room</span></div>
             <div id="liveList" class="participant-list live-participant-list" aria-live="polite"></div>
-            <p id="liveEmpty" class="empty-state">No students in live class yet. Admit someone from the lobby to see them here.</p>
+            <p id="liveEmpty" class="empty-state">No students in the video room yet. Admit someone from the normal room to see them here.</p>
           </section>
           <section class="manager-video-stage" aria-label="LiveKit classroom video">
             <div class="manager-video-title"><h3>Class video</h3><span id="videoConnectionStatus" class="badge">Not connected</span><span id="videoPeerCount" class="badge">0 participants</span></div>

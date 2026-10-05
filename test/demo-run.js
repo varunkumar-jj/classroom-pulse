@@ -98,39 +98,50 @@ async function main() {
       ok('a wrong teacher token is rejected');
     } else bad('a wrong teacher token was accepted');
 
-    let latestRoster = [];
-    teacher.on('participant-list', (list) => { latestRoster = list; });
+    let latestRoster = { mainRoom: [], videoRoom: [] };
+    teacher.on('participant-list', (payload) => { latestRoster = payload || { mainRoom: [], videoRoom: [] }; });
 
-    step(3, 'Three students join and wait in the lobby');
+    step(3, 'Three students join with no approval (QR / normal room join)');
     const students = [];
     for (const name of ['Asha', 'Ben', 'Chloe']) {
       const socket = connect(name);
       const joined = await emitAck(socket, 'student-join', { code, name });
       const lobby = await emitAck(socket, 'join-lobby', { code, name });
-      if (lobby.status === 'WAITING') ok(`${name} is WAITING in the lobby`);
+      if (lobby.status === 'MAIN') ok(`${name} joined the normal room with no approval needed`);
       else bad(`${name} status was ${lobby.status}`);
       students.push(socket);
     }
 
-    step(4, "Teacher's dashboard receives the live roster");
+    step(4, "Teacher sees two SEPARATE lists, no approval needed to be here");
     await new Promise((r) => setTimeout(r, 300));
-    if (latestRoster.length === 3) ok(`roster shows ${latestRoster.length} participants without a page refresh`);
-    else bad(`roster showed ${latestRoster.length}, expected 3`);
-    info(`waiting: ${latestRoster.filter((p) => p.status === 'WAITING').length}`);
+    const inMain = latestRoster.mainRoom.length;
+    const inVideo = latestRoster.videoRoom.length;
+    if (inMain === 3 && inVideo === 0) ok(`normal room=${inMain}, video room=${inVideo} (lists are separate)`);
+    else bad(`normal room=${inMain}, video room=${inVideo}, expected 3 and 0`);
+    const overlap = latestRoster.mainRoom.filter((p) => latestRoster.videoRoom.some((v) => v.id === p.id));
+    if (!overlap.length) ok('no student appears in both lists at once'); else bad(`${overlap.length} student(s) in both lists`);
 
     step(5, 'A student tries a host-only action (must be refused)');
     const denied = await emitAck(students[0], 'admit-participant', { code, participantId: students[1].id });
     if (denied.ok === false) ok(`student was denied: "${denied.err}"`); else bad('a student was allowed to admit others');
 
-    step(6, 'Teacher admits Asha into the live class');
-    const ashaId = latestRoster.find((p) => p.name === 'Asha')?.id;
+    step(6, 'Asha requests the video room (requesting must not grant access)');
+    await emitAck(students[0], 'request-video-access', {});
+    await new Promise((r) => setTimeout(r, 200));
+    if (latestRoster.mainRoom.some((p) => p.name === 'Asha' && p.wantsVideo)) ok('teacher sees Asha requested video');
+    else bad('the request was not visible to the teacher');
+    if (latestRoster.videoRoom.length === 0) ok('requesting alone did NOT put her in the video room');
+    else bad('requesting granted video access without approval');
+
+    step(7, 'Teacher admits Asha into the video room');
+    const ashaId = latestRoster.mainRoom.find((p) => p.name === 'Asha')?.id;
     const admitted = waitFor(students[0], 'participant-admitted');
     await emitAck(teacher, 'admit-participant', { code, participantId: ashaId });
     const admission = await admitted;
     if (admission.admissionTicket) ok('Asha received an admission ticket'); else bad('no admission ticket issued');
     info(`room=${admission.room}`);
 
-    step(7, 'Asha is refused a LiveKit token before using the ticket');
+    step(8, 'Asha is refused a LiveKit token before using the ticket');
     const early = await fetch(`${baseUrl}/api/video/token`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -139,15 +150,15 @@ async function main() {
     if (early.status === 403) ok('no video token without a ticket (the lobby cannot be skipped)');
     else bad(`expected 403, got ${early.status}`);
 
-    step(8, 'Teacher mutes Asha, then allows her to speak again');
+    step(9, 'Teacher mutes Asha, then allows her to speak again');
     const forced = waitFor(students[0], 'force-mute');
     await emitAck(teacher, 'mute-participant', { code, participantId: ashaId, muted: true });
     if ((await forced).muted === true) ok('Asha was force-muted'); else bad('no force-mute received');
     await emitAck(teacher, 'mute-participant', { code, participantId: ashaId, muted: false });
     ok('Asha was unmuted');
 
-    step(9, 'Teacher kicks Ben with a reason');
-    const benId = latestRoster.find((p) => p.name === 'Ben')?.id;
+    step(10, 'Teacher kicks Ben with a reason');
+    const benId = latestRoster.mainRoom.find((p) => p.name === 'Ben')?.id;
     const kickNotice = waitFor(students[1], 'participant-kicked');
     const benGone = waitFor(students[1], 'disconnect');
     const kicked = await emitAck(teacher, 'kick-participant', { code, participantId: benId, reason: 'Camera off during the lesson' });
@@ -159,17 +170,20 @@ async function main() {
     await benGone;
     ok('Ben was disconnected');
 
-    step(10, 'Kicking Ben again is a safe no-op');
+    step(11, 'Kicking Ben again is a safe no-op');
     const repeat = await emitAck(teacher, 'kick-participant', { code, participantId: benId, reason: 'Removed twice by mistake' });
     if (repeat.ok) ok('second kick returned success instead of crashing'); else bad('second kick failed');
 
-    step(11, 'Final roster after the whole flow');
+    step(12, 'Final roster after the whole flow');
     await new Promise((r) => setTimeout(r, 300));
-    const summary = latestRoster.map((p) => `${p.name}=${p.status}`).join(', ');
-    if (!latestRoster.some((p) => p.name === 'Ben')) ok('Ben is gone from the roster'); else bad('Ben is still listed');
-    info(`live roster: ${summary || 'empty'}`);
+    const summary = [...latestRoster.videoRoom, ...latestRoster.mainRoom].map((p) => `${p.name}=${p.status}`).join(', ');
+    const stillListed = [...latestRoster.videoRoom, ...latestRoster.mainRoom].some((p) => p.name === 'Ben');
+    if (!stillListed) ok('Ben is gone from both lists'); else bad('Ben is still listed');
+    info(`video room: ${latestRoster.videoRoom.map((p) => p.name).join(', ') || 'empty'}`);
+    info(`normal room: ${latestRoster.mainRoom.map((p) => p.name).join(', ') || 'empty'}`);
+    info(`summary: ${summary || 'empty'}`);
 
-    step(12, 'Every page and asset the manager needs is served');
+    step(13, 'Every page and asset the manager needs is served');
     for (const page of ['/participants.html', '/participants.js', '/icons.css', '/premium.css', '/style.css', '/student.html', '/teacher.html']) {
       const res = await fetch(baseUrl + page);
       if (res.ok) ok(`${page} -> ${res.status}`); else bad(`${page} -> ${res.status}`);
@@ -186,7 +200,7 @@ async function main() {
     log(` RESULT: ${failures} check(s) failed`);
     process.exitCode = 1;
   } else {
-    log(' RESULT: all checks passed - lobby, approval, mute, and kick all work');
+    log(' RESULT: all checks passed - normal room join, approval, mute, and kick all work');
   }
   log('='.repeat(72));
 }

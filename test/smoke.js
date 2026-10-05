@@ -54,7 +54,7 @@ async function testKickedPendingVideoIdentity() {
 
   const host = makeSocket('host-socket');
   const student = makeSocket('student-socket');
-  assert.equal((await emitAck(student, 'join-lobby', { code: roomCode, name: 'Student' })).status, 'WAITING');
+  assert.equal((await emitAck(student, 'join-lobby', { code: roomCode, name: 'Student' })).status, 'MAIN');
   assert.equal((await emitAck(host, 'host-join', { code: roomCode, token: 'host-secret' })).ok, true);
   assert.equal((await emitAck(host, 'admit-participant', { code: roomCode, participantId: student.id })).ok, true);
   const admissionTicket = control.participants.get(student.id).admissionTicket;
@@ -339,8 +339,8 @@ async function main() {
         code: roomCode,
         name: `Student ${index + 1}`
       });
-      assert.equal(lobbyJoin.ok, true, `student ${index + 1} should enter the approval lobby`);
-      assert.equal(lobbyJoin.status, 'WAITING', `student ${index + 1} should wait for teacher approval`);
+      assert.equal(lobbyJoin.ok, true, `student ${index + 1} should enter the normal room`);
+      assert.equal(lobbyJoin.status, 'MAIN', `student ${index + 1} should join the normal room without approval`);
       return { socket: student, update };
     }));
     const students = participants.map((participant) => participant.socket);
@@ -354,7 +354,7 @@ async function main() {
       code: roomCode,
       participantId: students[0].id
     });
-    assert.equal(admitted.ok, true, 'host should be able to admit a waiting participant');
+    assert.equal(admitted.ok, true, 'host should be able to admit a normal-room participant into video');
     const admission = await firstAdmitted;
     assert.equal(typeof admission.admissionTicket, 'string', 'admission should issue a scoped video ticket');
     const broadcastChat = new Promise((resolve) => students[0].once('classroom-message', resolve));

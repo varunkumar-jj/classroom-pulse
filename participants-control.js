@@ -2,7 +2,10 @@
 
 const crypto = require('crypto');
 
-const ACTIVE_STATUSES = new Set(['WAITING', 'ADMITTED', 'MUTED']);
+const ACTIVE_STATUSES = new Set(['MAIN', 'ADMITTED', 'MUTED']);
+// Only these statuses sit in the video room; everything else active is in the
+// normal room. The two lists stay separate on purpose.
+const VIDEO_ROOM_STATUSES = new Set(['ADMITTED', 'MUTED']);
 const TICKET_TTL_MS = 60_000;
 
 function createParticipantsControl({ io, rooms, liveKit }) {
@@ -27,22 +30,30 @@ function createParticipantsControl({ io, rooms, liveKit }) {
       room: entry.room,
       joinedAt: entry.joinedAt,
       videoIdentity: entry.liveKitIdentity || null,
-      muted: entry.status === 'MUTED'
+      muted: entry.status === 'MUTED',
+      // Lets the teacher see who has asked to join the live class.
+      wantsVideo: Boolean(entry.wantsVideo) && !VIDEO_ROOM_STATUSES.has(entry.status)
     };
   }
 
-  function activeParticipants(code) {
-    return [...participants.values()]
-      .filter((entry) => entry.code === code && entry.role === 'PARTICIPANT' && ACTIVE_STATUSES.has(entry.status))
-      .map(publicParticipant);
+  // The normal room and the video room are reported as two independent lists so
+  // a participant is never counted in both at once.
+  function roomParticipants(code) {
+    const mainRoom = [];
+    const videoRoom = [];
+    for (const entry of participants.values()) {
+      if (entry.code !== code || entry.role !== 'PARTICIPANT' || !ACTIVE_STATUSES.has(entry.status)) continue;
+      (VIDEO_ROOM_STATUSES.has(entry.status) ? videoRoom : mainRoom).push(publicParticipant(entry));
+    }
+    return { mainRoom, videoRoom };
   }
 
   function emitParticipantList(code) {
-    io.to(hostRoom(code)).emit('participant-list', activeParticipants(code));
+    io.to(hostRoom(code)).emit('participant-list', roomParticipants(code));
   }
 
   function emitLobbyUpdate(code) {
-    io.to(hostRoom(code)).emit('lobby-update', activeParticipants(code));
+    io.to(hostRoom(code)).emit('lobby-update', roomParticipants(code));
   }
 
   function notifyParticipant(socketId, event, payload) {
@@ -73,17 +84,18 @@ function createParticipantsControl({ io, rooms, liveKit }) {
         socketId: socket.id,
         name,
         role: 'PARTICIPANT',
-        status: previous?.code === code && ACTIVE_STATUSES.has(previous.status) ? previous.status : 'WAITING',
-        room: previous?.code === code && previous.status !== 'WAITING' ? 'video-room' : 'main-room',
+        status: previous?.code === code && ACTIVE_STATUSES.has(previous.status) ? previous.status : 'MAIN',
+        room: previous?.code === code && VIDEO_ROOM_STATUSES.has(previous.status) ? 'video-room' : 'main-room',
         code,
         joinedAt: previous?.code === code ? previous.joinedAt : Date.now(),
         liveKitIdentity: previous?.code === code ? previous.liveKitIdentity : null,
-        pendingLiveKitIdentity: null
+        pendingLiveKitIdentity: null,
+        wantsVideo: previous?.code === code ? previous.wantsVideo : false
       };
       participants.set(socket.id, entry);
       socket.join(channelRoom('main-room', code));
       let admissionTicket = null;
-      if (entry.status === 'ADMITTED' || entry.status === 'MUTED') {
+      if (VIDEO_ROOM_STATUSES.has(entry.status)) {
         socket.leave(channelRoom('main-room', code));
         socket.join(channelRoom('video-room', code));
         admissionTicket = issueAdmissionTicket(entry);
@@ -118,13 +130,13 @@ function createParticipantsControl({ io, rooms, liveKit }) {
       });
       emitParticipantList(code);
       emitLobbyUpdate(code);
-      callback?.({ ok: true, participants: activeParticipants(code) });
+      callback?.({ ok: true, participants: roomParticipants(code) });
     });
 
     socket.on('request-participant-list', (payload, callback) => {
       const code = String(payload?.code || '').trim().toUpperCase().slice(0, 10);
       if (!authenticatedHost(socket, code)) return callback?.({ ok: false, err: 'Host access required.' });
-      callback?.({ ok: true, participants: activeParticipants(code) });
+      callback?.({ ok: true, participants: roomParticipants(code) });
       emitParticipantList(code);
       emitLobbyUpdate(code);
     });
@@ -136,9 +148,10 @@ function createParticipantsControl({ io, rooms, liveKit }) {
       if (!entry || entry.code !== code || entry.role !== 'PARTICIPANT' || entry.status === 'KICKED') {
         return callback?.({ ok: false, err: 'Participant is no longer available.' });
       }
-      if (entry.status === 'WAITING') {
+      if (!VIDEO_ROOM_STATUSES.has(entry.status)) {
         entry.status = 'ADMITTED';
         entry.room = 'video-room';
+        entry.wantsVideo = false;
         const target = io.sockets.sockets.get(entry.socketId);
         if (target?.connected) {
           target.leave(channelRoom('main-room', code));
@@ -184,6 +197,17 @@ function createParticipantsControl({ io, rooms, liveKit }) {
       emitParticipantList(code);
       emitLobbyUpdate(code);
       callback?.({ ok: true, reason, timestamp: kickedAt });
+    });
+
+    socket.on('request-video-access', (payload, callback) => {
+      const entry = participants.get(socket.id);
+      if (!entry || entry.role !== 'PARTICIPANT') return callback?.({ ok: false, err: 'Participant is unavailable.' });
+      // Requesting only flags intent. The teacher still has to admit.
+      if (VIDEO_ROOM_STATUSES.has(entry.status)) return callback?.({ ok: true, alreadyInVideo: true });
+      entry.wantsVideo = true;
+      emitParticipantList(entry.code);
+      emitLobbyUpdate(entry.code);
+      callback?.({ ok: true });
     });
 
     socket.on('mute-participant', async (payload, callback) => {
@@ -251,11 +275,12 @@ function createParticipantsControl({ io, rooms, liveKit }) {
         : participants.get(socket.id)?.code;
       const entry = participants.get(socket.id);
       const message = typeof payload?.message === 'string' ? payload.message.trim().slice(0, 1000) : '';
-      if (!entry || !code || !message || (entry.role === 'PARTICIPANT' && !['ADMITTED', 'MUTED'].includes(entry.status))) {
+      if (!entry || !code || !message || (entry.role === 'PARTICIPANT' && !ACTIVE_STATUSES.has(entry.status))) {
         return callback?.({ ok: false, err: 'Join the classroom before sending a message.' });
       }
       const item = { from: entry.name, role: entry.role, message, timestamp: Date.now() };
-      io.to(channelRoom('video-room', code)).emit('classroom-message', item);
+      // Class chat reaches the whole classroom, so it goes to both rooms.
+      io.to(channelRoom('main-room', code)).to(channelRoom('video-room', code)).emit('classroom-message', item);
       callback?.({ ok: true });
     });
 
@@ -270,7 +295,7 @@ function createParticipantsControl({ io, rooms, liveKit }) {
       if (entry.role === 'HOST' && !authenticatedHost(socket, entry.code)) {
         return callback?.({ ok: false, err: 'Host access required.' });
       }
-      if (entry.role === 'PARTICIPANT' && (!['ADMITTED', 'MUTED'].includes(entry.status) || target.socketId !== socket.id)) {
+      if (entry.role === 'PARTICIPANT' && (!ACTIVE_STATUSES.has(entry.status) || target.socketId !== socket.id)) {
         return callback?.({ ok: false, err: 'Private messages are not available.' });
       }
       const item = { from: entry.name, participantId: entry.socketId, message, timestamp: Date.now() };

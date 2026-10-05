@@ -110,26 +110,32 @@ keys and the LiveKit API secret private; do not commit them.
 
 ## Lobby, approval, and the Participants Manager
 
-Students join a per-room **lobby** first and stay in a waiting screen until the
-teacher admits them into the **live class** video room. Teachers open the
-**Participants** button on their dashboard to reach `/participants.html`, a
-channelised control panel with a **Lobby** channel (admit or kick), a **Live
-class** channel (video grid plus per-tile mute and kick), and a **Chat** channel
-(class broadcast or a private message to one participant). The header shows
-total, live, and waiting counts, and every change arrives over Socket.IO, so the
-page never needs a refresh.
+Students join the **normal room** immediately and can vote, ask questions, and
+use class chat straight away — **no approval needed to be in the room**. Only
+the **video room** is gated: a student taps *Request to join video*, and the
+teacher still has to admit them. Teachers open the **Participants** button on
+their dashboard to reach `/participants.html`, a channelised control panel whose
+two room channels are backed by **two independent lists**: **Normal room**
+(Admit / Kick) and **Video room** (video grid plus per-tile mute and kick), plus
+a **Chat** channel for class broadcasts or a private message. A student appears
+in exactly one list at a time. The header shows total, normal-room, and
+video-room counts, and every change arrives over Socket.IO, so the page never
+needs a refresh.
 
 Server state lives in a single `Map` keyed by socket id, holding each entry's
-name, role, status, and room. Statuses are `WAITING`, `ADMITTED`, `MUTED`,
-`KICKED`, and `LEFT`. Room-code scoping keeps separate classes isolated, and
+name, role, status, and room. Statuses are `MAIN` (in the normal room, the
+default on join), `ADMITTED`, `MUTED`, `KICKED`, and `LEFT`. `roomParticipants()`
+splits the roster into `{ mainRoom, videoRoom }` on the way out, so a student can
+never be double-counted. Room-code scoping keeps separate classes isolated, and
 every privileged handler re-checks the caller is an authenticated host for that
-same room, so a client cannot claim a role it does not have. Kicking emits
-`participant-kicked` with a reason and timestamp, removes the student from the
-LiveKit room, and then disconnects the socket; kicking an already-removed
+same room, so a client cannot claim a role it does not have. Requesting video
+only sets a `wantsVideo` flag for the teacher; it never grants access. Kicking
+emits `participant-kicked` with a reason and timestamp, removes the student from
+the LiveKit room, and then disconnects the socket; kicking an already-removed
 participant returns success instead of failing. Video admission uses short-lived,
 single-use tickets: `/api/video/token` refuses to issue a student LiveKit token
-unless a valid admission ticket is presented, so a student cannot skip the lobby
-by calling the endpoint directly.
+unless a valid admission ticket is presented, so a student cannot skip the
+teacher's approval by calling the endpoint directly.
 
 ### Integration checklist
 
