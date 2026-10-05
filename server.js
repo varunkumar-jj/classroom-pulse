@@ -23,6 +23,65 @@ app.use((req, res, next) => {
   next();
 });
 app.use(express.json({ limit: '10kb' }));
+
+/* ===================== SEO ===================== */
+/*
+ * The public URL is derived from the incoming request so canonical tags, the
+ * sitemap and robots.txt stay correct on any host (localhost, a Render domain,
+ * or a custom domain) without reconfiguring anything after a deploy.
+ */
+function siteOrigin(req) {
+  const configured = process.env.PUBLIC_URL;
+  if (typeof configured === 'string' && configured.trim()) return configured.trim().replace(/\/+$/, '');
+  const proto = req.get('x-forwarded-proto') || req.protocol || 'http';
+  const host = req.get('x-forwarded-host') || req.get('host') || 'localhost:3000';
+  return `${proto}://${host}`;
+}
+
+// Pages that are application screens, not content. Keeping them out of the index
+// stops thin pages from competing with the landing page for the brand name.
+const PRIVATE_PATHS = ['/student.html', '/teacher.html', '/participants.html', '/report.html', '/create'];
+
+app.get('/robots.txt', (req, res) => {
+  const origin = siteOrigin(req);
+  res.type('text/plain').send(
+    [
+      'User-agent: *',
+      'Allow: /',
+      ...PRIVATE_PATHS.map((p) => `Disallow: ${p}`),
+      'Disallow: /api/',
+      '',
+      `Sitemap: ${origin}/sitemap.xml`,
+      '',
+    ].join('\n'),
+  );
+});
+
+app.get('/sitemap.xml', (req, res) => {
+  const origin = siteOrigin(req);
+  const today = new Date().toISOString().slice(0, 10);
+  // Only the landing page is public content. Room pages are generated per
+  // session and must never be advertised to search engines.
+  const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>${origin}/</loc>
+    <lastmod>${today}</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>1.0</priority>
+  </url>
+</urlset>`;
+  res.type('application/xml').send(xml);
+});
+
+// Fills in the real origin where the HTML carries a {{SITE_URL}} placeholder.
+app.get('/home.html', (req, res, next) => {
+  fs.readFile(path.join(__dirname, 'public', 'home.html'), 'utf8', (err, html) => {
+    if (err) return next(err);
+    res.type('html').send(html.split('{{SITE_URL}}').join(siteOrigin(req)));
+  });
+});
+
 app.use(express.static(path.join(__dirname, 'public')));
 app.get('/vendor/qr-scanner/qr-scanner.min.js', (req, res) => {
   res.sendFile(path.join(__dirname, 'node_modules', 'qr-scanner', 'qr-scanner.min.js'));
@@ -422,6 +481,9 @@ function createRoom() {
     history: [],                // {time, topic, counts:{lost,ok,faster}, total, lostPct, marker?, reexplain?}
     events: [],                 // {type:'spike'|'reexplain', topic, time, ...}
     pushSubscriptions: new Map(),
+    // Attendance is deliberately a plain Map keyed by student id. It is capped
+    // at the same size as the student list, so it can never grow on its own.
+    attendance: new Map(),  // studentId -> {status, markedAt, auto}
     reexplain: null,            // {before, startedAt, deadline, answers:Map<sid, answer>}
     topics: ['General'],
     currentTopic: 'General',
@@ -654,6 +716,7 @@ function snapshotForTeacher(room) {
       lostPct: h.lostPct, marker: h.marker, reexplain: h.reexplain
     })),
     events: room.events,
+    attendance: attendanceSnapshot(room),
     quiz: quizSnapshotForTeacher(room)
   };
 }
@@ -675,6 +738,7 @@ function reportSnapshot(room) {
     events: room.events,
     answeredQsCount: answeredQs.length,
     unansweredQuestions: unansweredQs.map(q => ({ id: q.id, text: q.text, upvotes: q.upvotes.size })),
+    attendance: attendanceSnapshot(room),
     history: hist.map(h => ({
       time: h.time,
       topic: h.topic,
@@ -688,6 +752,47 @@ function reportSnapshot(room) {
 
 function studentQuestionList(room) {
   return room.questions.filter(q => !q.hidden).map(x => ({ id: x.id, text: x.text, upvotes: x.upvotes.size }));
+}
+
+/* ===================== attendance ===================== */
+/*
+ * Attendance is intentionally tiny and boring:
+ *
+ *   - Joining marks a student PRESENT automatically, because turning up IS the
+ *     evidence. The teacher can then change any row to absent or late.
+ *   - Only three statuses exist. Anything else is rejected rather than stored,
+ *     so the data can never become unqueryable later.
+ *   - It lives in the room's own Map, so it disappears with the room exactly
+ *     like every other piece of classroom state.
+ */
+const ATTENDANCE_STATUSES = ['present', 'absent', 'late'];
+
+function markAttendance(room, studentId, status, options = {}) {
+  if (!ATTENDANCE_STATUSES.includes(status)) return null;
+  const student = room.students.get(studentId);
+  if (!student) return null;
+  const entry = {
+    status,
+    markedAt: now(),
+    // auto=true means the system guessed from joining; false means a human chose.
+    auto: Boolean(options.auto),
+    name: student.name || studentId
+  };
+  room.attendance.set(studentId, entry);
+  return entry;
+}
+
+function attendanceSnapshot(room) {
+  const rows = [...room.attendance.values()];
+  const counts = { present: 0, absent: 0, late: 0, unmarked: 0 };
+  for (const row of rows) counts[row.status] = (counts[row.status] || 0) + 1;
+  // Students in the room that were never marked (e.g. joined before a reload).
+  counts.unmarked = Math.max(0, room.students.size - rows.length);
+  return {
+    counts,
+    total: room.students.size,
+    rows: rows.sort((a, b) => a.name.localeCompare(b.name))
+  };
 }
 
 /* ===================== socket ===================== */
@@ -710,6 +815,8 @@ io.on('connection', (socket) => {
     if (!room.students.has(studentId)) room.students.set(studentId, { name: payload?.name ? sanitize(payload.name, 30) : '', joinedAt: now(), lastSeen: now() });
     else if (payload?.name) room.students.get(studentId).name = sanitize(payload.name, 30);
     room.students.get(studentId).lastSeen = now();
+    // First arrival counts as present, but never overwrite a teacher's choice.
+    if (!room.attendance.has(studentId)) markAttendance(room, studentId, 'present', { auto: true });
     role = 'student';
     socket.join(code);
     socket.emit('your-vote', room.votes.get(studentId) || null);
@@ -790,6 +897,29 @@ io.on('connection', (socket) => {
     room.currentTopic = room.topics[0];
     broadcastRoomUpdate(room);
     cb?.({ ok: true, topics: room.topics, currentTopic: room.currentTopic });
+  });
+
+  socket.on('mark-attendance', (payload, cb) => {
+    if (!room || role !== 'teacher') return cb?.({ ok: false, err: 'Not teacher' });
+    const studentId = sanitize(payload?.studentId, 64);
+    const status = payload?.status;
+    const entry = markAttendance(room, studentId, status);
+    if (!entry) return cb?.({ ok: false, err: 'Unknown student or status' });
+    broadcastRoomUpdate(room);
+    cb?.({ ok: true, attendance: attendanceSnapshot(room) });
+  });
+
+  // Marks everyone present in one call, for the common "roll call is done"
+  // case, which is much faster than 40 individual clicks.
+  socket.on('mark-all-attendance', (payload, cb) => {
+    if (!room || role !== 'teacher') return cb?.({ ok: false, err: 'Not teacher' });
+    const status = payload?.status || 'present';
+    if (!ATTENDANCE_STATUSES.includes(status)) return cb?.({ ok: false, err: 'Bad status' });
+    for (const studentId of room.students.keys()) {
+      markAttendance(room, studentId, status, { auto: true });
+    }
+    broadcastRoomUpdate(room);
+    cb?.({ ok: true, attendance: attendanceSnapshot(room) });
   });
 
   socket.on('next-topic', (_, cb) => {
