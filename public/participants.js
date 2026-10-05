@@ -84,7 +84,8 @@
       admit.textContent = '✓ Admit';
       admit.addEventListener('click', () => runAction(async () => {
         await emitAck('admit-participant', { code: roomCode, participantId: participant.id });
-        showToast(`${participant.name} was admitted.`);
+        activateTab(document.getElementById('tab-live'), false);
+        showToast(`${participant.name} was admitted and moved to Live class.`);
       }));
       actions.appendChild(admit);
     }
@@ -108,11 +109,18 @@
     document.getElementById('waitingCount').textContent = String(waiting.length);
     document.getElementById('lobbyTabCount').textContent = String(waiting.length);
     document.getElementById('liveTabCount').textContent = String(live.length);
+    document.getElementById('waitingSummary').textContent = `${waiting.length} waiting`;
+    document.getElementById('liveSummary').textContent = `${live.length} admitted`;
+    document.getElementById('liveSideCount').textContent = `${live.length} student${live.length === 1 ? '' : 's'}`;
 
     lobbyList.replaceChildren();
     liveList.replaceChildren();
     if (!waiting.length) lobbyList.appendChild(emptyState('No one is waiting right now.'));
-    if (!live.length) liveList.appendChild(emptyState('No participants have been admitted yet.'));
+    document.getElementById('liveEmpty').hidden = live.length > 0;
+    document.getElementById('liveVideoPlaceholder').classList.toggle('hidden', live.length > 0);
+    document.getElementById('livePreviewEmpty').innerHTML = live.length
+      ? `<span class="manager-preview-icon"><i class="icon-user-round" aria-hidden="true"></i></span><p><strong>${live.length} student${live.length === 1 ? '' : 's'} admitted</strong>They’ll appear here when they join video.</p>`
+      : '<span class="manager-preview-icon"><i class="icon-video" aria-hidden="true"></i></span><p><strong>No one admitted yet</strong>Students you admit appear here automatically.</p>';
     waiting.forEach((participant) => lobbyList.appendChild(participantCard(participant, false)));
     live.forEach((participant) => liveList.appendChild(participantCard(participant, true)));
     attachVideoTileControls();
@@ -145,6 +153,7 @@
     state.pendingKick = participant;
     document.getElementById('kickTargetLabel').textContent = `Remove ${participant.name} from this classroom?`;
     document.getElementById('kickReason').value = '';
+    document.getElementById('kickError').textContent = '';
     kickDialog.showModal();
     document.getElementById('kickReason').focus();
   }
@@ -205,6 +214,7 @@
     metadata.append(sender, time);
     message.append(metadata, body);
     const messages = document.getElementById('chatMessages');
+    document.getElementById('chatEmpty')?.remove();
     messages.appendChild(message);
     messages.scrollTop = messages.scrollHeight;
   }
@@ -218,6 +228,7 @@
       const response = await emitAck('host-join', { code: roomCode, token: teacherToken });
       state.authenticated = true;
       document.getElementById('roomLabel').textContent = `Room ${roomCode} · Host connected`;
+      document.getElementById('managerBackLink').href = `/teacher.html?room=${encodeURIComponent(roomCode)}#token=${encodeURIComponent(teacherToken)}`;
       renderParticipants(response.participants || []);
       await emitAck('request-participant-list', { code: roomCode });
     } catch (error) {
@@ -227,7 +238,20 @@
 
   const managerTabs = [...document.querySelectorAll('.manager-tab')];
 
-  function activateTab(tab) {
+  function startManagerVideo() {
+    document.getElementById('videoRoom').classList.remove('hidden');
+    document.getElementById('videoConnectionStatus').textContent = 'Connecting…';
+    if (!window.ClassroomVideo) return;
+    window.ClassroomVideo.start().then(() => {
+      document.getElementById('liveVideoPlaceholder').classList.add('hidden');
+    }).catch((error) => {
+      document.getElementById('videoConnectionStatus').textContent = 'Unavailable';
+      document.getElementById('liveVideoPlaceholder').classList.remove('hidden');
+      showToast(error.message || 'Video could not be started.', 'error');
+    });
+  }
+
+  function activateTab(tab, connectVideo = true) {
     managerTabs.forEach((item) => {
       const active = item === tab;
       item.classList.toggle('active', active);
@@ -237,14 +261,7 @@
     document.querySelectorAll('.manager-channel').forEach((channel) => {
       channel.classList.toggle('active', channel.id === `channel-${tab.dataset.channel}`);
     });
-    if (tab.dataset.channel === 'live') {
-      document.getElementById('videoRoom').classList.remove('hidden');
-      if (window.ClassroomVideo) {
-        window.ClassroomVideo.start().catch((error) => showToast(error.message || 'Video could not be started.', 'error'));
-      } else {
-        document.getElementById('videoRoomBtn').click();
-      }
-    }
+    if (tab.dataset.channel === 'live' && connectVideo) startManagerVideo();
   }
 
   managerTabs.forEach((tab, index) => {
@@ -263,27 +280,27 @@
   });
 
   window.addEventListener('classroom-video-ready', () => {
-    if (!document.getElementById('channel-live').classList.contains('active')) return;
-    document.getElementById('videoRoom').classList.remove('hidden');
-    window.ClassroomVideo?.start().catch((error) => showToast(error.message || 'Video could not be started.', 'error'));
+    if (document.getElementById('channel-live').classList.contains('active')) startManagerVideo();
   });
 
   const videoGridObserver = new MutationObserver(attachVideoTileControls);
   videoGridObserver.observe(document.getElementById('videoGrid'), { childList: true });
 
-  document.getElementById('videoRoomBtn').addEventListener('click', () => {
-    if (window.ClassroomVideo) {
-      window.ClassroomVideo.start().catch((error) => showToast(error.message || 'Video could not be started.', 'error'));
-    }
-  });
-
+  document.getElementById('videoRoomBtn').addEventListener('click', startManagerVideo);
+  document.getElementById('stageConnect').addEventListener('click', startManagerVideo);
+  document.getElementById('closeKickDialog').addEventListener('click', () => kickDialog.close());
   document.getElementById('cancelKickBtn').addEventListener('click', () => kickDialog.close());
   document.getElementById('kickForm').addEventListener('submit', (event) => {
     event.preventDefault();
     const participant = state.pendingKick;
-    const reason = document.getElementById('kickReason').value.trim();
-    if (!participant || reason.length < 3) return;
-    kickDialog.close();
+      const reason = document.getElementById('kickReason').value.trim();
+      if (!participant) return;
+      if (reason.length < 3) {
+        document.getElementById('kickError').textContent = 'Enter a reason of at least 3 characters.';
+        document.getElementById('kickReason').focus();
+        return;
+      }
+      kickDialog.close();
     runAction(async () => {
       await emitAck('kick-participant', { code: roomCode, participantId: participant.id, reason });
       showToast(`${participant.name} was removed from the classroom.`);

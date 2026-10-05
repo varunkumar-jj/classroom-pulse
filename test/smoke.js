@@ -217,7 +217,7 @@ async function main() {
 
     for (const page of [
       '/home.html', '/student.html', '/teacher.html', '/participants.html', '/participants.js',
-      '/report.html', '/styles.css', '/style.css', '/video-room.js',
+      '/report.html', '/styles.css', '/style.css', '/premium.css', '/icons.css', '/video-room.js',
       '/vendor/livekit-client/livekit-client.esm.mjs',
       '/service-worker.js', '/vendor/qr-scanner/qr-scanner.min.js',
       '/vendor/qr-scanner/qr-scanner-worker.min.js'

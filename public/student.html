@@ -6,24 +6,26 @@
     <meta name="google-site-verification" content="m74BzUrM6upSULSK9g7_K7u8Nb36o0tpxECnsOutb8w" />
     <title>Student | Classroom Pulse</title>
     <meta name="description" content="Join your classroom on Classroom Pulse — respond to check-ins, ask questions, take quizzes, and join video sessions." />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" />
     <link rel="stylesheet" href="/styles.css" />
     <link rel="stylesheet" href="/style.css" />
+    <link rel="stylesheet" href="/premium.css" />
     <script src="/socket.io/socket.io.js"></script>
   </head>
   <body>
-    <div class="container">
-      <header>
-        <div class="brand"><span class="brand-mark">✳</span><span>Classroom Pulse</span></div>
-        <div class="toolbar">
-          <div class="badge connection-badge" id="connectionBadge">Connecting</div>
-          <div class="badge" id="roomBadge">Room: —</div>
-          <button id="joinVideoBtn" class="blue hidden">📹 Join Video</button>
-        </div>
-      </header>
+    <main class="student-page" id="studentPage">
+      <div class="student-shell">
+        <header class="student-header">
+          <div>
+            <div class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span>Classroom Pulse</span></div>
+            <span class="brand-subtitle">Student classroom</span>
+          </div>
+          <div class="toolbar">
+            <div class="badge connection-badge" id="connectionBadge">Connecting</div>
+            <div class="badge" id="roomBadge">Room: —</div>
+          </div>
+        </header>
 
-      <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
+        <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
       <section id="waitingApproval" class="approval-overlay hidden" role="status" aria-live="polite">
         <div class="approval-card">
           <span class="approval-spinner" aria-hidden="true"></span>
@@ -94,70 +96,68 @@
         </div>
       </div>
 
-      <div class="grid">
-        <section class="card">
-          <div class="row">
-            <h2>Current topic</h2>
-            <span class="badge" id="currentTopic">General</span>
-          </div>
+        <section class="join-panel card" aria-labelledby="studentJoinTitle">
+          <div class="teacher-context">Join your classroom</div>
+          <h1 id="studentJoinTitle">Join room</h1>
+          <p class="small">Enter your name and the room code shared by your teacher.</p>
           <form id="joinForm">
-            <label>
-              Your name
-              <input id="studentName" maxlength="30" placeholder="Your name" />
-            </label>
-            <label>
-              Room code
-              <input id="roomInput" maxlength="10" placeholder="ABCD" required />
-            </label>
-            <button type="submit" class="primary" style="width:100%;margin-top:4px;">Join room →</button>
+            <label for="studentName">Your name<input id="studentName" maxlength="30" autocomplete="name" placeholder="Your name" /></label>
+            <label for="roomInput">Room code<input id="roomInput" maxlength="10" autocomplete="off" placeholder="ABCD" required /></label>
+            <button type="submit" class="primary" style="width:100%;">Join classroom <span aria-hidden="true">→</span></button>
           </form>
-
-          <div id="votePanel" class="hidden" style="margin-top: 20px;">
-            <h3>How are you feeling?</h3>
-            <div class="vote-grid">
-              <button class="vote-btn" data-vote="lost">Lost</button>
-              <button class="vote-btn" data-vote="ok">OK</button>
-              <button class="vote-btn" data-vote="faster">Faster</button>
-            </div>
-          </div>
         </section>
 
-        <section class="card">
-          <h2>Ask a question</h2>
-          <form id="questionForm">
-            <textarea id="questionInput" maxlength="140" rows="4" placeholder="Type your question..." aria-describedby="questionCount"></textarea>
-            <div class="form-hint"><span>Keep it short and clear</span><span id="questionCount">0 / 140</span></div>
-            <div class="inline-actions" style="margin-top: 10px;">
-              <button type="submit" class="primary">Send</button>
-            </div>
-          </form>
-          <div id="reexplainPanel" class="hidden" style="margin-top: 18px;">
-            <h3>Re-explain check-in</h3>
-            <div class="inline-actions">
-              <button class="reexplain-btn success" data-answer="got_it">✓ Got it</button>
-              <button class="reexplain-btn danger" data-answer="still_lost">✗ Still lost</button>
-            </div>
-          </div>
-        </section>
-      </div>
+        <div class="student-live-content">
+          <section class="student-topic-header" aria-label="Current lesson">
+            <div><p class="eyebrow">Current topic</p><h1 id="currentTopic">General</h1></div>
+            <div class="topic-pill" id="studentTopicRoom">Classroom Pulse</div>
+          </section>
 
-      <section class="card" style="margin-top: 20px;">
-        <h2>Questions</h2>
-        <ul id="questionList" class="list"></ul>
-      </section>
-      <section id="studentChatCard" class="card hidden" style="margin-top: 20px;">
-        <div class="row">
-          <h2>Class chat</h2>
-          <span class="badge">Live class</span>
+          <div class="student-live-grid">
+            <section class="student-checkin" aria-labelledby="checkinTitle">
+              <h2 id="checkinTitle">How are you feeling?</h2>
+              <p class="small">Your response helps your teacher adjust the pace for this topic.</p>
+              <div id="votePanel" class="hidden" style="margin-top:0;">
+                <div class="vote-grid" role="group" aria-label="Understanding check-in">
+                  <button class="vote-btn" data-vote="lost" type="button" aria-pressed="false">Lost<span>I need another explanation.</span></button>
+                  <button class="vote-btn" data-vote="ok" type="button" aria-pressed="false">OK<span>I’m following along.</span></button>
+                  <button class="vote-btn" data-vote="faster" type="button" aria-pressed="false">Faster<span>I’m ready to move on.</span></button>
+                </div>
+                <p id="voteConfirmation" class="student-local-confirmation hidden" role="status" aria-live="polite">Response saved.</p>
+              </div>
+            </section>
+
+            <aside class="student-tools" aria-label="More ways to take part">
+              <h2>During this class</h2>
+              <div class="student-tool-row"><div><strong>Class video</strong><span>Join with your camera off.</span></div><button id="joinVideoBtn" class="hidden" type="button">Join</button></div>
+              <div class="student-tool-row"><div><strong>Re-explain check-in</strong><span id="reexplainCopy">No follow-up right now. If your teacher opens one, you can respond here.</span></div></div>
+              <div id="reexplainPanel" class="hidden"><div class="inline-actions"><button class="reexplain-btn success" data-answer="got_it" type="button">Got it</button><button class="reexplain-btn danger" data-answer="still_lost" type="button">Still lost</button></div></div>
+              <div class="student-tool-row"><div><strong>Live quiz</strong><span>When your teacher launches a quiz, it will open here.</span></div></div>
+            </aside>
+          </div>
+
+          <section class="student-question-card" aria-labelledby="askTitle">
+            <div><h2 id="askTitle">Ask a question</h2><p>Your question goes to your teacher. Keep it short and clear.</p></div>
+            <form id="questionForm">
+              <label for="questionInput">Your question</label>
+              <textarea id="questionInput" maxlength="140" rows="2" placeholder="What would you like your teacher to explain?" aria-describedby="questionCount"></textarea>
+              <div class="student-question-actions"><div class="form-hint"><span>Keep it short and clear</span><span id="questionCount">0 / 140</span></div><div class="inline-actions"><button type="submit" class="primary">Post question</button></div></div>
+              <p id="questionConfirmation" class="student-local-confirmation hidden" role="status" aria-live="polite"></p>
+            </form>
+          </section>
+
+          <div class="student-bottom-grid">
+            <section class="student-list-card" aria-labelledby="studentQuestionsTitle"><div class="row"><h2 id="studentQuestionsTitle">Class questions</h2><span class="small">Recent first</span></div><ul id="questionList" class="list"></ul></section>
+            <section id="studentChatCard" class="student-chat-card hidden" aria-labelledby="studentChatTitle">
+              <div class="row"><h2 id="studentChatTitle">Class chat</h2><span class="badge">Everyone</span></div>
+              <div id="studentChatMessages" class="student-chat-messages" role="log" aria-live="polite"></div>
+              <form id="studentChatForm" class="student-chat-form"><label class="sr-only" for="studentChatInput">Message to the class</label><input id="studentChatInput" maxlength="1000" placeholder="Message everyone in class…" autocomplete="off" required /><button class="primary" type="submit">Send message</button></form>
+            </section>
+          </div>
+          <footer class="student-footer"><span>Classroom Pulse · <span id="studentFooterRoom">Room</span></span><span>Questions go directly to your teacher.</span></footer>
         </div>
-        <div id="studentChatMessages" class="student-chat-messages" role="log" aria-live="polite"></div>
-        <form id="studentChatForm" class="student-chat-form">
-          <label class="sr-only" for="studentChatInput">Message to the class</label>
-          <input id="studentChatInput" maxlength="1000" placeholder="Message everyone in class…" autocomplete="off" required />
-          <button class="primary" type="submit">Send</button>
-        </form>
-      </section>
-    </div>
+      </div>
+    </main>
 
     <script>
       /* ===== State ===== */
@@ -180,6 +180,9 @@
       const studentChatForm = document.getElementById('studentChatForm');
       const studentChatInput = document.getElementById('studentChatInput');
       const studentChatMessages = document.getElementById('studentChatMessages');
+      const studentPage = document.getElementById('studentPage');
+      const voteConfirmation = document.getElementById('voteConfirmation');
+      const questionConfirmation = document.getElementById('questionConfirmation');
       const socket = io();
       let studentId = localStorage.getItem('classroom-pulse-student-id') || '';
       let joined = false;
@@ -222,14 +225,17 @@
               return;
             }
             joined = true;
+            studentPage.classList.add('is-joined');
             roomBadge.textContent = 'Room: ' + code;
+            document.getElementById('studentTopicRoom').textContent = 'Room ' + code;
+            document.getElementById('studentFooterRoom').textContent = code;
             votePanel.classList.remove('hidden');
             if (lobbyResponse.status === 'WAITING') {
               studentChatCard.classList.add('hidden');
               document.getElementById('approvalRoomLabel').textContent = 'Room ' + code + ' • Waiting for approval';
               document.getElementById('waitingApproval').classList.remove('hidden');
               joinVideoBtn.classList.add('hidden');
-              showStatus('You are in the lobby. Waiting for your teacher to admit you.', 'info');
+              statusBanner.classList.add('hidden');
             } else if (lobbyResponse.admissionTicket) {
               enterVideoRoom(lobbyResponse.admissionTicket);
             }
@@ -244,7 +250,6 @@
         document.getElementById('waitingApproval').classList.add('hidden');
         studentChatCard.classList.remove('hidden');
         joinVideoBtn.classList.remove('hidden');
-        showStatus('Your teacher admitted you. Connecting to the video room…', 'success');
         const startVideo = function () {
           window.ClassroomVideo.start().catch((error) => {
             showStatus(error.message || 'Could not start the video room.', 'error');
@@ -315,8 +320,13 @@
           const vote = this.dataset.vote;
           socket.emit('vote', { vote }, function (response) {
             if (!response || !response.ok) { showStatus(response?.err || 'Vote failed.', 'error'); return; }
-            document.querySelectorAll('.vote-btn').forEach((item) => item.classList.toggle('selected', item.dataset.vote === vote));
-            showStatus('Vote saved.', 'success');
+            document.querySelectorAll('.vote-btn').forEach((item) => {
+              const selected = item.dataset.vote === vote;
+              item.classList.toggle('selected', selected);
+              item.setAttribute('aria-pressed', String(selected));
+            });
+            voteConfirmation.textContent = `Response saved: ${vote === 'lost' ? 'Lost' : vote === 'ok' ? 'OK' : 'Faster'}.`;
+            voteConfirmation.classList.remove('hidden');
           });
         });
       });
@@ -328,9 +338,11 @@
         if (!text) return;
         socket.emit('question', { text }, function (response) {
           if (!response || !response.ok) { showStatus(response?.err || 'Question not sent.', 'error'); return; }
+          const postedText = text;
           questionInput.value = '';
           questionCount.textContent = '0 / 140';
-          showStatus('Question posted.', 'success');
+          questionConfirmation.textContent = `Question posted: “${postedText}”`;
+          questionConfirmation.classList.remove('hidden');
         });
       });
 
@@ -340,13 +352,21 @@
             if (!response || !response.ok) { showStatus(response?.err || 'Could not submit response.', 'error'); return; }
             reexplainPanel.classList.add('hidden');
             reexplainAnswered = true;
-            showStatus('Response recorded.', 'success');
+            document.getElementById('reexplainCopy').textContent = 'Response recorded. Thanks for checking in.';
           });
         });
       });
 
       socket.on('your-vote', function (vote) {
-        document.querySelectorAll('.vote-btn').forEach((item) => item.classList.toggle('selected', item.dataset.vote === vote));
+        document.querySelectorAll('.vote-btn').forEach((item) => {
+          const selected = item.dataset.vote === vote;
+          item.classList.toggle('selected', selected);
+          item.setAttribute('aria-pressed', String(selected));
+        });
+        if (vote) {
+          voteConfirmation.textContent = `Response saved: ${vote === 'lost' ? 'Lost' : vote === 'ok' ? 'OK' : 'Faster'}.`;
+          voteConfirmation.classList.remove('hidden');
+        }
       });
 
       socket.on('room-update', function (room) {
@@ -358,8 +378,16 @@
         const active = Boolean(room.reexplain);
         if (active && !reexplainActive) reexplainAnswered = false;
         reexplainActive = active;
-        if (active && !reexplainAnswered) reexplainPanel.classList.remove('hidden');
-        else reexplainPanel.classList.add('hidden');
+        if (active && !reexplainAnswered) {
+          reexplainPanel.classList.remove('hidden');
+          document.getElementById('reexplainCopy').textContent = 'Your teacher opened a quick check-in. Choose the response that fits.';
+          reexplainPanel.append(reexplainPanel.querySelector('.inline-actions'));
+        } else {
+          reexplainPanel.classList.add('hidden');
+          document.getElementById('reexplainCopy').textContent = active && reexplainAnswered
+            ? 'Response recorded. Thanks for checking in.'
+            : 'No follow-up right now. If your teacher opens one, you can respond here.';
+        }
       });
 
       socket.on('connect', function () {

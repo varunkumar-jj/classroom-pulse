@@ -6,54 +6,61 @@
     <meta name="google-site-verification" content="m74BzUrM6upSULSK9g7_K7u8Nb36o0tpxECnsOutb8w" />
     <title>Report | Classroom Pulse</title>
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/premium.css" />
+    <link rel="stylesheet" href="/icons.css" />
     <script src="/socket.io/socket.io.js"></script>
   </head>
   <body>
-    <div class="container">
-      <header>
-        <h1>Room Report</h1>
-        <div class="toolbar">
-          <span id="roomBadge" class="badge">Room: —</span>
-          <button id="downloadReportBtn" type="button" disabled>Download CSV</button>
-          <button id="printReportBtn" type="button" disabled>Print report</button>
-        </div>
-      </header>
+    <main class="report-page">
+      <div class="report-shell">
+        <header class="report-header">
+          <a class="report-brand" href="/home.html" aria-label="Classroom Pulse home"><span class="brand-mark" aria-hidden="true">✳</span><span>Classroom Pulse</span></a>
+          <div class="report-toolbar">
+            <span class="report-room-chip">Room <strong id="roomBadge">—</strong></span>
+            <button id="downloadReportBtn" class="btn" type="button" disabled><i class="icon-file-down" aria-hidden="true"></i>Download CSV</button>
+            <button id="printReportBtn" class="btn" type="button" disabled><i class="icon-printer" aria-hidden="true"></i>Print report</button>
+          </div>
+        </header>
 
-      <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
+        <div id="statusBanner" class="status-banner hidden" role="status" aria-live="polite"></div>
 
-      <div class="grid">
-        <section class="card">
-          <h3>Participation</h3>
-          <div class="small">Students: <span id="studentCount">0</span></div>
-          <div class="small">Votes: <span id="totalVotes">0</span></div>
-          <div class="small">Participation: <span id="participation">0%</span></div>
+        <section class="report-heading">
+          <div><h1>Room report</h1><p>Participation, questions and history from this session.</p></div>
         </section>
 
-        <section class="card">
-          <h3>Peak lost percentage</h3>
-          <div id="peakPct">0%</div>
-          <div class="small" id="peakTopic">General</div>
+        <section class="report-followup" aria-labelledby="unansweredTitle">
+          <div class="row"><h2 class="report-section-heading" id="unansweredTitle">Unanswered questions <span class="report-section-count" id="unansweredListCount">0</span></h2></div>
+          <ul id="unansweredList" class="report-history-list"></ul>
         </section>
 
-        <section class="card">
-          <h3>Question summary</h3>
-          <div class="small">Answered: <span id="answeredCount">0</span></div>
-          <div class="small">Unanswered: <span id="unansweredCount">0</span></div>
+        <section class="report-overview" aria-labelledby="summaryTitle">
+          <h2 class="report-overview-title" id="summaryTitle">Session summary</h2>
+          <div class="report-metric-grid">
+            <section class="report-metric">
+              <p class="report-metric-label">Participation</p>
+              <strong class="report-metric-value primary" id="participation">0%</strong>
+              <p class="report-metric-detail">Students who cast a vote in this room.</p>
+              <div class="report-attendance-detail"><span><strong id="studentCount">0</strong>Students</span><span><strong id="totalVotes">0</strong>Votes</span></div>
+            </section>
+            <section class="report-metric">
+              <p class="report-metric-label">Peak lost percentage</p>
+              <strong class="report-metric-value" id="peakPct">—</strong>
+              <p class="report-metric-detail" id="peakTopic">Waiting for 3 votes before reporting a reliable peak.</p>
+            </section>
+            <section class="report-metric">
+              <p class="report-metric-label">Question summary</p>
+              <div class="report-question-counts"><div><strong id="answeredCount">0</strong><span>Answered</span></div><div><strong id="unansweredCount">0</strong><span>Unanswered</span></div></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="report-history" aria-labelledby="historyTitle">
+          <div class="report-history-heading"><h2 class="report-section-heading" id="historyTitle">History</h2></div>
+          <ul id="historyList" class="report-history-list"></ul>
+          <p class="report-footnote" id="reportFootnote">Room activity will appear here when it is available.</p>
         </section>
       </div>
-
-      <div class="grid" style="margin-top: 20px;">
-        <section class="card">
-          <h2>Unanswered questions</h2>
-          <ul id="unansweredList" class="list"></ul>
-        </section>
-
-        <section class="card">
-          <h2>History</h2>
-          <ul id="historyList" class="list"></ul>
-        </section>
-      </div>
-    </div>
+    </main>
 
     <script>
       const params = new URLSearchParams(window.location.search);
@@ -75,20 +82,25 @@
         loadedReport = report;
         document.getElementById('downloadReportBtn').disabled = false;
         document.getElementById('printReportBtn').disabled = false;
-        document.getElementById('roomBadge').textContent = 'Room: ' + report.code;
+        document.getElementById('roomBadge').textContent = report.code;
+        document.getElementById('reportFootnote').textContent = 'Report for room ' + report.code;
         document.getElementById('studentCount').textContent = report.studentCount;
         document.getElementById('totalVotes').textContent = report.totalVotes;
         document.getElementById('participation').textContent = report.participation + '%';
         document.getElementById('peakPct').textContent = report.peak ? report.peak.pct + '%' : '—';
-        document.getElementById('peakTopic').textContent = report.peak?.topic || 'Waiting for 3 votes';
+        document.getElementById('peakTopic').textContent = report.peak
+          ? report.peak.topic
+          : `${report.totalVotes} ${report.totalVotes === 1 ? 'vote' : 'votes'} recorded. A reliable peak appears after 3 votes.`;
         document.getElementById('answeredCount').textContent = report.answeredQsCount || 0;
 
         const unanswered = report.unansweredQuestions || [];
         document.getElementById('unansweredCount').textContent = unanswered.length;
+        document.getElementById('unansweredListCount').textContent = unanswered.length;
         const unansweredList = document.getElementById('unansweredList');
-        unansweredList.innerHTML = '';
+        unansweredList.replaceChildren();
         if (!unanswered.length) {
           const item = document.createElement('li');
+          item.className = 'report-empty-inline';
           item.textContent = 'No unanswered questions.';
           unansweredList.appendChild(item);
         } else {
@@ -98,18 +110,19 @@
             text.textContent = question.text;
             const count = document.createElement('div');
             count.className = 'small';
-            count.textContent = 'Upvotes: ' + question.upvotes;
+            count.textContent = question.upvotes + (question.upvotes === 1 ? ' upvote' : ' upvotes');
             item.append(text, count);
             unansweredList.appendChild(item);
           });
         }
 
         const historyList = document.getElementById('historyList');
-        historyList.innerHTML = '';
+        historyList.replaceChildren();
         const history = report.history || [];
         if (!history.length) {
           const item = document.createElement('li');
-          item.textContent = 'No history recorded.';
+          item.className = 'report-empty-inline';
+          item.textContent = 'No history recorded. Room activity will appear here when it is available.';
           historyList.appendChild(item);
         } else {
           history.forEach((entry) => {
@@ -150,9 +163,7 @@
         link.click();
         URL.revokeObjectURL(url);
       });
-      document.getElementById('printReportBtn').addEventListener('click', function () {
-        window.print();
-      });
+      document.getElementById('printReportBtn').addEventListener('click', function () { window.print(); });
 
       socket.emit('report-request', { code: roomCode, token }, function (response) {
         if (!response || !response.ok) {

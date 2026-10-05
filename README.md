@@ -142,6 +142,16 @@ New files:
 - `public/participants.html` — the three-channel Participants Manager page.
 - `public/participants.js` — live roster rendering, controls, chat, toasts.
 - `public/style.css` — dark dashboard styling for the manager, lobby, and chat.
+- `public/premium.css` — shared visual refresh for every page.
+- `public/icons.css` — the `icon-*` SVG mask icons used across the pages. The
+  markup ships empty `<i class="icon-name">` elements, so without this file
+  those icons render as invisible gaps. Keep it linked from every page that
+  uses an `icon-*` class.
+- `test/audit-dom.js` — static check that every `getElementById()` and every
+  `icon-*` class a page uses actually resolves, so a renamed element or a
+  forgotten icon fails fast instead of breaking silently in the browser.
+- `test/demo-run.js` — live demonstration of the whole lobby flow against a
+  real server.
 
 Edits to existing files:
 
@@ -158,10 +168,19 @@ Edits to existing files:
   `participant-admitted`, `participant-kicked`, and chat listeners.
 - `public/video-room.js`: send `admissionTicket` with the token request, emit
   `register-video-identity` once connected, and apply `force-mute` to the local
-  microphone.
+  microphone. Every control lookup here is null-guarded, so a page may
+  deliberately omit a control: students have no `shareScreenBtn`.
 - `test/smoke.js`: covers host authentication, the student-cannot-admit check,
   single-use admission tickets, mute/unmute, kick with reason, and the new
   static pages.
+
+### Checks
+
+```sh
+npm test          # static DOM/icon audit, then the full integration smoke test
+npm run test:audit
+npm run test:demo  # live lobby -> admit -> mute -> kick run
+```
 
 ## Deploy the Node app
 

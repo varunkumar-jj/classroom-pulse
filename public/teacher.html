@@ -6,25 +6,30 @@
     <meta name="google-site-verification" content="m74BzUrM6upSULSK9g7_K7u8Nb36o0tpxECnsOutb8w" />
     <title>Teacher Dashboard | Classroom Pulse</title>
     <meta name="description" content="Teacher dashboard for Classroom Pulse — live check-ins, AI quiz generator, and video room." />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800;900&display=swap" />
     <link rel="stylesheet" href="/styles.css" />
+    <link rel="stylesheet" href="/premium.css" />
+    <link rel="stylesheet" href="/icons.css" />
     <script src="/socket.io/socket.io.js"></script>
   </head>
-  <body>
-    <div class="container">
-      <header>
-        <div>
-          <div class="brand"><span class="brand-mark">✳</span><span>Classroom Pulse</span></div>
-          <h1 style="margin:8px 0 0;">Teacher Dashboard</h1>
+  <body class="teacher-page">
+    <div class="teacher-shell">
+      <header class="teacher-header">
+        <div class="teacher-header-main">
+          <div class="brand"><span class="brand-mark" aria-hidden="true">✳</span><span>Classroom Pulse</span></div>
+          <h1 class="teacher-header-title">Teacher dashboard</h1>
         </div>
-        <div class="toolbar">
+        <div class="teacher-header-actions">
           <div class="badge connection-badge" id="connectionBadge">Connecting</div>
-          <button id="videoRoomBtn" class="blue" disabled>📹 Start Video Room</button>
-          <a id="participantsManagerLink" class="btn" href="#" aria-disabled="true">👥 Participants</a>
-          <button id="nextTopicBtn" class="primary" disabled>Next topic</button>
-          <button id="reexplainBtn" disabled>Re-explain</button>
-          <a id="reportLink" class="btn" href="#">📊 Report</a>
+          <a id="participantsManagerLink" class="btn teacher-desktop-action" href="#" aria-disabled="true" tabindex="-1">Participants</a>
+          <a id="reportLink" class="btn teacher-desktop-action" href="#" aria-disabled="true" tabindex="-1">Room report</a>
+          <details class="teacher-tools-menu">
+            <summary class="btn">Room tools</summary>
+            <div class="teacher-tools-popover">
+              <a class="btn" href="#teacherVideoStrip">Start video room</a>
+              <a href="#" data-room-action="participants" aria-disabled="true" tabindex="-1">Participants</a>
+              <a href="#" data-room-action="report" aria-disabled="true" tabindex="-1">Room report</a>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -55,159 +60,147 @@
         </div>
       </div>
 
-      <!-- Main dashboard tabs -->
-      <div class="tabs" style="margin-top:18px;">
-        <button class="tab-btn active" data-tab="classroom" id="tabClassroom">🎓 Classroom</button>
-        <button class="tab-btn" data-tab="quiz" id="tabQuiz">🤖 AI Quiz</button>
-        <button class="tab-btn" data-tab="questions" id="tabQuestions">❓ Questions</button>
-        <button class="tab-btn" data-tab="events" id="tabEvents">📋 Events</button>
-      </div>
+      <section class="teacher-heading" aria-label="Current classroom">
+        <div>
+          <h1>Teacher dashboard</h1>
+          <p>Your classroom, right now.</p>
+        </div>
+        <div class="teacher-room-chip"><span>Room</span><strong id="roomCodeBadge">—</strong><span aria-hidden="true">·</span><span id="currentTopic">General</span></div>
+      </section>
+
+      <nav class="teacher-nav" role="tablist" aria-label="Teacher dashboard sections">
+        <button class="tab-btn active" data-tab="classroom" id="tabClassroom" role="tab" aria-selected="true" aria-controls="panel-classroom" tabindex="0" type="button">Classroom</button>
+        <button class="tab-btn" data-tab="quiz" id="tabQuiz" role="tab" aria-selected="false" aria-controls="panel-quiz" tabindex="-1" type="button">AI Quiz</button>
+        <button class="tab-btn" data-tab="questions" id="tabQuestions" role="tab" aria-selected="false" aria-controls="panel-questions" tabindex="-1" type="button">Questions</button>
+        <button class="tab-btn" data-tab="events" id="tabEvents" role="tab" aria-selected="false" aria-controls="panel-events" tabindex="-1" type="button">Events</button>
+      </nav>
 
       <!-- TAB: Classroom -->
-      <div class="tab-panel active" id="panel-classroom">
-        <div class="grid">
-          <section class="card">
-            <div class="row">
-              <h2>Room</h2>
-              <span id="roomCodeBadge" class="badge">Room: —</span>
+      <section class="tab-panel active" id="panel-classroom" role="tabpanel" aria-labelledby="tabClassroom" tabindex="0">
+        <div class="teacher-workspace">
+          <section class="teacher-live-panel" aria-labelledby="liveSignalTitle">
+            <div class="teacher-context"><span aria-hidden="true">●</span><span>Live understanding</span><span aria-hidden="true">/</span><span>Current topic</span></div>
+            <div class="teacher-topic-row">
+              <div>
+                <h2 id="liveSignalTitle">General</h2>
+                <p class="teacher-response-count">Responses so far: <strong id="totalVotes">0</strong></p>
+              </div>
+              <div class="teacher-threshold" aria-label="Three responses are needed to read the trend">
+                <strong id="lostPct">0 / 3</strong>
+                <span>minimum responses<br />to read the trend</span>
+              </div>
             </div>
-            <div class="room-invite">
-              <img id="roomQr" alt="Scan to join this classroom" width="176" height="176" />
-              <p class="small">Scan to join, or share the room code.</p>
+            <div class="teacher-divider"></div>
+            <div class="teacher-vote-title"><h3>How the class is feeling</h3><span id="voteStatus">No responses yet</span></div>
+            <div class="teacher-vote-rows" aria-label="Live vote distribution">
+              <div class="teacher-vote-row"><span class="teacher-vote-label lost">Lost</span><div class="teacher-vote-track"><span id="lostBar" class="lost" style="display:block;width:0%;height:100%;background:var(--cp-lost);"></span></div><span id="lostCount" class="teacher-vote-value">0</span></div>
+              <div class="teacher-vote-row"><span class="teacher-vote-label ok">OK</span><div class="teacher-vote-track"><span id="okBar" style="display:block;width:0%;height:100%;background:var(--cp-ok);"></span></div><span id="okCount" class="teacher-vote-value">0</span></div>
+              <div class="teacher-vote-row"><span class="teacher-vote-label faster">Faster</span><div class="teacher-vote-track"><span id="fasterBar" style="display:block;width:0%;height:100%;background:var(--cp-faster);"></span></div><span id="fasterCount" class="teacher-vote-value">0</span></div>
             </div>
-            <div class="inline-actions" style="margin-top: -8px; margin-bottom: 14px;">
-              <button id="copyCodeBtn" type="button">Copy code</button>
-              <button id="copyInviteBtn" type="button">Copy link</button>
+            <div class="teacher-sufficiency-note" id="thresholdHint"><strong id="thresholdTitle">Waiting for a reliable signal</strong><span id="thresholdDetail">A support prompt requires at least 3 responses. Until then, the class trend is not available.</span></div>
+            <div class="teacher-lesson-actions">
+              <p>Need a quick check-in at any point?</p>
+              <div class="inline-actions">
+                <button id="reexplainBtn" type="button" disabled>Re-explain</button>
+                <button id="nextTopicBtn" class="primary" type="button" disabled>Next topic <span aria-hidden="true">→</span></button>
+              </div>
             </div>
-            <div class="alert-setup">
-              <button id="enableAlertsBtn" type="button">🔔 Enable phone alerts</button>
-              <p class="small">Get vibration and notifications for questions or confusion spikes.</p>
-            </div>
-            <div style="margin-top:14px;">
-              <div class="small">Students connected: <strong id="studentCount">0</strong></div>
-              <div class="small" style="margin-top:4px;">Current topic: <span id="currentTopic">General</span></div>
-            </div>
-            <label style="margin-top:18px;">
-              Topics (one per line)
-              <textarea id="topicsInput" rows="4" placeholder="General&#10;Topic 2&#10;Topic 3"></textarea>
-            </label>
-            <button id="setTopicsBtn" class="primary" disabled>Update topics</button>
           </section>
 
-          <section class="card">
-            <h2>Live vote summary</h2>
-            <div class="bar-grid">
-              <div>
-                <div class="small">Lost</div>
-                <div id="lostCount">0</div>
+          <aside class="teacher-rail" aria-label="Room setup">
+            <section class="teacher-invite-card" aria-labelledby="inviteStudentsTitle">
+              <div class="teacher-invite-heading"><h2 id="inviteStudentsTitle">Invite students</h2><span><strong id="studentCount">0</strong> connected</span></div>
+              <div class="teacher-invite-layout">
+                <img id="roomQr" alt="Scan to join this classroom" width="100" height="100" />
+                <p class="small">Scan to join, or share the room code.</p>
+                <strong class="teacher-code" id="roomCodeText">—</strong>
               </div>
-              <div>
-                <div class="small">OK</div>
-                <div id="okCount">0</div>
+              <div class="teacher-invite-actions">
+                <button id="copyCodeBtn" type="button">Copy code</button>
+                <button id="copyInviteBtn" type="button">Copy link</button>
               </div>
-              <div>
-                <div class="small">Faster</div>
-                <div id="fasterCount">0</div>
+            </section>
+            <section class="teacher-setup-card" aria-labelledby="lessonSetupTitle">
+              <h3 id="lessonSetupTitle">Lesson setup</h3>
+              <label for="topicsInput">Topics, one per line</label>
+              <textarea id="topicsInput" rows="2" placeholder="General&#10;Topic 2&#10;Topic 3"></textarea>
+              <div class="teacher-setup-actions">
+                <button id="setTopicsBtn" type="button" disabled>Update topics</button>
+                <button id="enableAlertsBtn" type="button">Enable phone alerts</button>
               </div>
-            </div>
-            <div class="meter">
-              <span id="lostBar" class="lost" style="width:0%"></span>
-            </div>
-            <div class="small">Total votes: <span id="totalVotes">0</span></div>
-            <div class="small">Lost %: <span id="lostPct">Need 3 votes</span></div>
-            <div id="thresholdHint" class="small">A support prompt requires at least 3 responses.</div>
-          </section>
+            </section>
+          </aside>
         </div>
-      </div>
+
+        <section class="teacher-video-strip" id="teacherVideoStrip" aria-label="Class video controls">
+          <div class="teacher-video-copy"><strong>Class video</strong><span>Start a room for live audio, video, and screen sharing.</span></div>
+          <div class="toolbar"><button id="videoRoomBtn" type="button" disabled>Start video room</button></div>
+        </section>
+        <div class="teacher-bottom-panels">
+          <section class="teacher-list-panel" aria-labelledby="teacherQuestionsTitle"><div class="row"><h2 id="teacherQuestionsTitle">Student questions</h2><a class="muted-link" href="#panel-questions" data-open-teacher-tab="questions">Open Questions</a></div><ul id="questionsPreview" class="list"><li class="small">No student questions yet.</li></ul></section>
+          <section class="teacher-list-panel" aria-labelledby="teacherEventsTitle"><div class="row"><h2 id="teacherEventsTitle">Events &amp; history</h2><a class="muted-link" href="#panel-events" data-open-teacher-tab="events">Open Events</a></div><ul id="eventsPreview" class="list"><li class="small">No events yet.</li></ul></section>
+        </div>
+      </section>
 
       <!-- TAB: AI Quiz -->
-      <div class="tab-panel" id="panel-quiz">
-        <div class="grid" style="grid-template-columns:1fr 1fr;">
-          <!-- Upload & Generate -->
-          <section class="card">
-            <div class="ai-section-header">
-              <span class="ai-icon">🤖</span>
-              <div>
-                <h2 style="margin:0;font-size:1.15rem;">AI Quiz Generator</h2>
-                <p class="small" style="margin:2px 0 0;">Upload class material → build a source-grounded, mixed-format quiz</p>
+      <section class="tab-panel" id="panel-quiz" role="tabpanel" aria-labelledby="tabQuiz" tabindex="0">
+        <section class="teacher-quiz-section" aria-labelledby="quizSectionTitle">
+          <div class="section-heading">
+            <div><h2 id="quizSectionTitle">Build a quiz from lesson material</h2><p>Review reference answers before sharing a quiz with your class.</p></div>
+            <span class="teacher-room-chip">AI Quiz</span>
+          </div>
+          <div class="teacher-quiz-layout">
+            <section class="card" aria-label="Quiz settings">
+              <div class="ai-section-header">
+                <span class="ai-icon" aria-hidden="true"><i class="icon-file-question"></i></span>
+                <div><h2 style="margin:0;font-size:1rem;">Quiz generator</h2><p class="small" style="margin:3px 0 0;">Choose your lesson source and question mix.</p></div>
               </div>
-            </div>
-
-            <div class="upload-zone" id="uploadZone">
-              <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.md" />
-              <div class="upload-icon">📄</div>
-              <div class="upload-label">Drop file or click to upload</div>
-              <div class="upload-hint">PDF, Word (.docx), or plain text · Max 100 MB</div>
-            </div>
-
-            <div id="fileChipWrapper" class="hidden" style="margin-top:12px;"></div>
-
-            <div class="quiz-count-row">
-              <label for="quizCount">Number of questions</label>
-              <input type="number" id="quizCount" min="1" max="20" value="5" />
-            </div>
-            <label>
-              Difficulty
-              <select id="quizDifficulty">
-                <option value="mixed">Balanced mix</option>
-                <option value="easy">Easy</option>
-                <option value="medium">Medium</option>
-                <option value="hard">Hard</option>
-              </select>
-            </label>
-            <fieldset class="quiz-type-options">
-              <legend>Question types</legend>
-              <label><input type="checkbox" name="quizType" value="mcq" checked /> Multiple choice</label>
-              <label><input type="checkbox" name="quizType" value="true_false" checked /> True / false</label>
-              <label><input type="checkbox" name="quizType" value="short_answer" checked /> Short answer (AI graded)</label>
-            </fieldset>
-            <p class="small">Short answers are graded by AI using the generated rubric. Review the preview before launching.</p>
-
-            <button id="generateQuizBtn" class="primary" style="width:100%;margin-top:14px;" disabled>
-              ✨ Generate Quiz
-            </button>
-
-            <div id="aiProgress" class="ai-progress hidden" style="margin-top:14px;">
-              <div class="ai-spinner"></div>
-              <span id="aiProgressText">Analyzing document with GPT-4o...</span>
-            </div>
-          </section>
-
-          <!-- Quiz Preview & Controls -->
-          <section class="card">
-            <div class="row" style="margin-bottom:14px;">
-              <h2 style="margin:0;">Quiz Preview</h2>
-              <div id="quizLiveBadge" class="quiz-live-badge hidden">Live</div>
-            </div>
-
-            <div id="quizEmptyState" style="color:var(--muted);font-size:0.88rem;">
-              No quiz generated yet. Upload a file and click "Generate Quiz" to get started.
-            </div>
-
-            <div id="quizPreview" class="quiz-preview hidden"></div>
-
-            <div id="quizActions" class="hidden" style="margin-top:16px;">
-              <div class="inline-actions">
-                <button id="launchQuizBtn" class="primary">🚀 Launch Quiz</button>
-                <button id="endQuizBtn" class="danger hidden">⏹ End Quiz</button>
-                <button id="clearQuizBtn">🗑 Clear</button>
+              <div class="upload-zone" id="uploadZone" role="button" tabindex="0" aria-label="Choose or drop a lesson file">
+                <input type="file" id="fileInput" accept=".pdf,.docx,.doc,.txt,.md" />
+                <div class="upload-icon" aria-hidden="true"><i class="icon-file-up"></i></div>
+                <div class="upload-label">Choose or drop a lesson file</div>
+                <div class="upload-hint">PDF, Word, Markdown, or text · up to 100 MB</div>
               </div>
-              <div id="quizResponseCount" class="small hidden" style="margin-top:10px;">
-                Responses: <strong id="quizResponded">0</strong> / <strong id="quizStudentCount">0</strong> students
+              <div id="fileChipWrapper" class="hidden" style="margin-top:12px;"></div>
+              <div class="quiz-count-row">
+                <label for="quizCount">Number of questions</label>
+                <input type="number" id="quizCount" min="1" max="20" value="5" />
               </div>
-            </div>
-
-            <!-- Quiz results after ending -->
-            <div id="quizResults" class="hidden" style="margin-top:18px;">
-              <h3>📊 Quiz Results</h3>
-              <div id="quizResultsList" style="display:grid;gap:10px;"></div>
-            </div>
-          </section>
-        </div>
-      </div>
+              <label>Difficulty
+                <select id="quizDifficulty">
+                  <option value="mixed">Balanced mix</option><option value="easy">Easy</option><option value="medium">Medium</option><option value="hard">Hard</option>
+                </select>
+              </label>
+              <fieldset class="quiz-type-options">
+                <legend>Question types</legend>
+                <label><input type="checkbox" name="quizType" value="mcq" checked /> Multiple choice</label>
+                <label><input type="checkbox" name="quizType" value="true_false" checked /> True / false</label>
+                <label><input type="checkbox" name="quizType" value="short_answer" checked /> Short answer · AI graded</label>
+              </fieldset>
+              <p class="small">Short answers are graded by AI using the generated rubric. Review the preview before launching.</p>
+              <button id="generateQuizBtn" class="primary" style="width:100%;margin-top:12px;" disabled>Generate quiz</button>
+              <div id="aiProgress" class="ai-progress hidden" style="margin-top:12px;"><div class="ai-spinner"></div><span id="aiProgressText">Reading the source and building a balanced, answer-checked quiz…</span></div>
+            </section>
+            <section class="card" aria-label="Quiz preview">
+              <div class="row" style="margin-bottom:12px;"><h2 style="margin:0;font-size:1rem;">Quiz preview</h2><div id="quizLiveBadge" class="quiz-live-badge hidden">Live</div></div>
+              <div id="quizEmptyState" class="quiz-empty-state"><strong>Your questions will appear here</strong><p>Upload a lesson file to build a source-grounded quiz. Review questions, reference answers, and rubrics before launch.</p></div>
+              <div id="quizPreview" class="quiz-preview hidden"></div>
+              <div id="quizActions" class="hidden" style="margin-top:16px;">
+                <div class="inline-actions">
+                  <button id="launchQuizBtn" class="primary" type="button">Launch quiz</button>
+                  <button id="endQuizBtn" class="danger hidden" type="button">End quiz</button>
+                  <button id="clearQuizBtn" type="button">Clear quiz</button>
+                </div>
+                <div id="quizResponseCount" class="small hidden" style="margin-top:10px;">Responses: <strong id="quizResponded">0</strong> / <strong id="quizStudentCount">0</strong> students</div>
+              </div>
+              <div id="quizResults" class="hidden" style="margin-top:18px;"><h3>Quiz results</h3><div id="quizResultsList" style="display:grid;gap:10px;"></div></div>
+            </section>
+          </div>
+        </section>
+      </section>
 
       <!-- TAB: Questions -->
-      <div class="tab-panel" id="panel-questions">
+      <div class="tab-panel" id="panel-questions" role="tabpanel" aria-labelledby="tabQuestions" tabindex="0">
         <section class="card" style="margin-top:0;">
           <h2>Student Questions</h2>
           <ul id="questionsList" class="list"></ul>
@@ -215,7 +208,7 @@
       </div>
 
       <!-- TAB: Events -->
-      <div class="tab-panel" id="panel-events">
+      <div class="tab-panel" id="panel-events" role="tabpanel" aria-labelledby="tabEvents" tabindex="0">
         <section class="card" style="margin-top:0;">
           <h2>Events &amp; History</h2>
           <ul id="eventsList" class="list"></ul>
@@ -245,20 +238,58 @@
       const knownEventIds = new Set();
 
       /* ========= Tabs ========= */
-      document.querySelectorAll('.tab-btn').forEach(btn => {
-        btn.addEventListener('click', function () {
-          document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-          document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-          this.classList.add('active');
-          document.getElementById('panel-' + this.dataset.tab).classList.add('active');
+      const teacherTabs = [...document.querySelectorAll('.tab-btn')];
+      function activateTeacherTab(tab) {
+        teacherTabs.forEach((item) => {
+          const active = item === tab;
+          item.classList.toggle('active', active);
+          item.setAttribute('aria-selected', String(active));
+          item.tabIndex = active ? 0 : -1;
         });
+        document.querySelectorAll('.tab-panel').forEach((panel) => {
+          panel.classList.toggle('active', panel.id === 'panel-' + tab.dataset.tab);
+        });
+      }
+      teacherTabs.forEach((tab, index) => {
+        tab.addEventListener('click', () => activateTeacherTab(tab));
+        tab.addEventListener('keydown', (event) => {
+          let nextIndex = index;
+          if (event.key === 'ArrowRight') nextIndex = (index + 1) % teacherTabs.length;
+          else if (event.key === 'ArrowLeft') nextIndex = (index - 1 + teacherTabs.length) % teacherTabs.length;
+          else if (event.key === 'Home') nextIndex = 0;
+          else if (event.key === 'End') nextIndex = teacherTabs.length - 1;
+          else return;
+          event.preventDefault();
+          teacherTabs[nextIndex].focus();
+          activateTeacherTab(teacherTabs[nextIndex]);
+        });
+      });
+      document.querySelectorAll('[data-open-teacher-tab]').forEach((link) => {
+        link.addEventListener('click', (event) => {
+          event.preventDefault();
+          const tab = document.querySelector(`.tab-btn[data-tab="${link.dataset.openTeacherTab}"]`);
+          if (tab) { activateTeacherTab(tab); tab.focus(); }
+        });
+      });
+      document.querySelector('.teacher-tools-menu').addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') { this.open = false; this.querySelector('summary').focus(); }
+      });
+      document.querySelectorAll('.teacher-tools-menu a').forEach((link) => {
+        link.addEventListener('click', () => { document.querySelector('.teacher-tools-menu').open = false; });
       });
 
       /* ========= Controls ========= */
       function setTeacherControls(enabled) {
         joined = enabled;
         ['nextTopicBtn', 'reexplainBtn', 'setTopicsBtn', 'copyCodeBtn', 'copyInviteBtn', 'videoRoomBtn'].forEach((id) => {
-          document.getElementById(id).disabled = !enabled;
+          const control = document.getElementById(id);
+          if (control) control.disabled = !enabled;
+        });
+        [document.getElementById('participantsManagerLink'), reportLink, ...document.querySelectorAll('[data-room-action]')].forEach((link) => {
+          if (!enabled) {
+            link.setAttribute('aria-disabled', 'true');
+            link.tabIndex = -1;
+          }
         });
         if (enabled && currentQuiz) {
           document.getElementById('launchQuizBtn').disabled = false;
@@ -280,12 +311,19 @@
           connectionBadge.classList.add('connected');
           connectionBadge.classList.remove('disconnected');
           setTeacherControls(true);
-          reportLink.href = '/report.html?room=' + encodeURIComponent(roomCode) + '#token=' + encodeURIComponent(token);
+          const reportUrl = '/report.html?room=' + encodeURIComponent(roomCode) + '#token=' + encodeURIComponent(token);
+          const managerUrl = '/participants.html?room=' + encodeURIComponent(roomCode) + '#token=' + encodeURIComponent(token);
+          document.querySelectorAll('[data-room-action="report"]').forEach((link) => { link.href = reportUrl; });
+          reportLink.href = reportUrl;
+          reportLink.setAttribute('aria-disabled', 'false');
+          reportLink.removeAttribute('tabindex');
           document.getElementById('roomQr').src = '/api/rooms/' + encodeURIComponent(roomCode) + '/qr.svg';
           document.getElementById('videoRoomCode').textContent = roomCode;
           const managerLink = document.getElementById('participantsManagerLink');
-          managerLink.href = '/participants.html?room=' + encodeURIComponent(roomCode) + '#token=' + encodeURIComponent(token);
+          managerLink.href = managerUrl;
           managerLink.setAttribute('aria-disabled', 'false');
+          managerLink.removeAttribute('tabindex');
+          document.querySelectorAll('[data-room-action="participants"]').forEach((link) => { link.href = managerUrl; });
           renderRoom(response.room);
         });
       }
@@ -410,29 +448,79 @@
         });
       }
 
+      function renderSummaryLists(questions, events) {
+        const questionsPreview = document.getElementById('questionsPreview');
+        const visibleQuestions = (questions || []).filter((question) => !question.hidden).slice(-3).reverse();
+        questionsPreview.replaceChildren();
+        if (!visibleQuestions.length) {
+          const empty = document.createElement('li');
+          empty.className = 'small';
+          empty.textContent = 'No student questions yet.';
+          questionsPreview.appendChild(empty);
+        } else {
+          visibleQuestions.forEach((question) => {
+            const item = document.createElement('li');
+            item.textContent = question.text;
+            questionsPreview.appendChild(item);
+          });
+        }
+
+        const eventsPreview = document.getElementById('eventsPreview');
+        const recentEvents = (events || []).slice(-3).reverse();
+        eventsPreview.replaceChildren();
+        if (!recentEvents.length) {
+          const empty = document.createElement('li');
+          empty.className = 'small';
+          empty.textContent = 'No events yet.';
+          eventsPreview.appendChild(empty);
+        } else {
+          recentEvents.forEach((event) => {
+            const item = document.createElement('li');
+            const title = document.createElement('strong');
+            title.textContent = event.type === 'spike' ? 'Support suggested' : (event.verdict || event.type);
+            const detail = document.createElement('div');
+            detail.className = 'small';
+            detail.textContent = [event.topic || 'General', event.lostPct === undefined ? '' : `${event.lostPct}% lost`].filter(Boolean).join(' · ');
+            item.append(title, detail);
+            eventsPreview.appendChild(item);
+          });
+        }
+      }
+
       function renderRoom(room) {
         if (!room) return;
         renderNewAlerts(room);
-        roomCodeBadge.textContent = 'Room: ' + room.code;
+        roomCodeBadge.textContent = room.code;
+        document.getElementById('roomCodeText').textContent = room.code;
         studentCount.textContent = room.studentCount;
         currentTopic.textContent = room.currentTopic || 'General';
+        document.getElementById('liveSignalTitle').textContent = room.currentTopic || 'General';
         if (document.activeElement !== topicsInput) topicsInput.value = (room.topics || ['General']).join('\n');
         document.getElementById('lostCount').textContent = room.bars.lost;
         document.getElementById('okCount').textContent = room.bars.ok;
         document.getElementById('fasterCount').textContent = room.bars.faster;
         document.getElementById('totalVotes').textContent = room.totalVotes;
         const hasReliableSample = room.totalVotes >= 3;
-        document.getElementById('lostPct').textContent = hasReliableSample ? room.lostPct + '%' : 'Need 3 votes';
-        document.getElementById('thresholdHint').textContent = hasReliableSample
-          ? (room.thresholdReached ? 'Support prompt suggested: more than 30% feel lost.' : 'No support prompt threshold reached.')
-          : 'A support prompt requires at least 3 responses.';
-        document.getElementById('lostBar').style.width = hasReliableSample ? room.lostPct + '%' : '0%';
+        document.getElementById('lostPct').textContent = `${Math.min(room.totalVotes, 3)} / 3`;
+        document.getElementById('voteStatus').textContent = room.totalVotes
+          ? `${room.totalVotes} response${room.totalVotes === 1 ? '' : 's'}`
+          : 'No responses yet';
+        document.getElementById('thresholdTitle').textContent = hasReliableSample
+          ? (room.thresholdReached ? 'Support may be needed' : 'Class signal is ready')
+          : 'Waiting for a reliable signal';
+        document.getElementById('thresholdDetail').textContent = hasReliableSample
+          ? (room.thresholdReached ? `${room.lostPct}% feel lost. Consider re-explaining this topic.` : 'No support prompt threshold reached for this topic.')
+          : 'A support prompt requires at least 3 responses. Until then, the class trend is not available.';
+        const denominator = room.totalVotes || 1;
+        document.getElementById('lostBar').style.width = `${room.bars.lost / denominator * 100}%`;
+        document.getElementById('okBar').style.width = `${room.bars.ok / denominator * 100}%`;
+        document.getElementById('fasterBar').style.width = `${room.bars.faster / denominator * 100}%`;
+        document.getElementById('reexplainBtn').classList.toggle('primary', room.thresholdReached);
+        document.getElementById('nextTopicBtn').classList.toggle('primary', !room.thresholdReached);
         renderQuestions(room.questions);
         renderEvents(room.events || []);
-        // Update quiz state from server
-        if (room.quiz) {
-          renderQuizFromServer(room.quiz);
-        }
+        renderSummaryLists(room.questions, room.events);
+        if (room.quiz) renderQuizFromServer(room.quiz);
         document.getElementById('quizStudentCount').textContent = room.studentCount;
       }
 
@@ -552,6 +640,12 @@
       const maxQuizFileSize = 100 * 1024 * 1024;
 
       uploadZone.addEventListener('click', () => fileInput.click());
+      uploadZone.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          fileInput.click();
+        }
+      });
       fileInput.addEventListener('change', function () {
         if (this.files[0]) setSelectedFile(this.files[0]);
       });

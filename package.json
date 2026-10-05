@@ -4,7 +4,10 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
-    "test:smoke": "node test\\smoke.js"
+    "test:smoke": "node test\\smoke.js",
+    "test:audit": "node test\\audit-dom.js",
+    "test:demo": "node test\\demo-run.js",
+    "test": "npm run test:audit && npm run test:smoke"
   },
   "engines": {
     "node": ">=22.3.0 <23"
